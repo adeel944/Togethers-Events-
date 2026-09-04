@@ -37,8 +37,6 @@ async function loadBookingsForBusiness(businessId: string): Promise<any[]> {
   if (primary.error) throw primary.error;
   if (primary.data?.length) return primary.data;
 
-  // Legacy recovery: older booking rows may not have business_id populated.
-  // We only recover rows whose client belongs to the signed-in business.
   const { data: clients, error: clientError } = await supabase.from('clients').select('id').eq('business_id', businessId);
   if (clientError || !clients?.length) return [];
   const clientIds = clients.map((client: any) => client.id).filter(Boolean);
@@ -68,9 +66,24 @@ export const bookingService = {
     const businessId = await getBusinessId();
     const totalAmount = Number(payload.totalAmount || 0);
     const advancePaid = Number(payload.advancePaid || 0);
-    const paymentStatus: Booking['paymentStatus'] = advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending';
     const { assignedVendors = [], ...bookingPayload } = payload;
-    const { data, error } = await supabase.from('bookings').insert({ business_id: businessId, client_id: bookingPayload.clientId, event_type: bookingPayload.eventType, event_date: bookingPayload.eventDate, event_time: bookingPayload.eventTime || '', venue: bookingPayload.venue || '', guest_count: Number(bookingPayload.guestCount || 0), package: bookingPayload.package || '', total_amount: totalAmount, advance_paid: advancePaid, booking_status: bookingPayload.bookingStatus, payment_status: paymentStatus, notes: bookingPayload.notes || '' }).select('*').single();
+
+    // payment_status and remaining_amount are database-generated columns.
+    // Never include generated columns in INSERT payloads.
+    const { data, error } = await supabase.from('bookings').insert({
+      business_id: businessId,
+      client_id: bookingPayload.clientId,
+      event_type: bookingPayload.eventType,
+      event_date: bookingPayload.eventDate,
+      event_time: bookingPayload.eventTime || '',
+      venue: bookingPayload.venue || '',
+      guest_count: Number(bookingPayload.guestCount || 0),
+      package: bookingPayload.package || '',
+      total_amount: totalAmount,
+      advance_paid: advancePaid,
+      booking_status: bookingPayload.bookingStatus,
+      notes: bookingPayload.notes || '',
+    }).select('*').single();
     if (error) throw error;
     if (assignedVendors.length) {
       const { error: vendorError } = await supabase.from('booking_vendors').insert(assignedVendors.map((vendor) => ({ booking_id: data.id, vendor_id: vendor.vendorId, vendor_name: vendor.vendorName, category: vendor.category, agreed_amount: Number(vendor.agreedAmount || 0), payment_status: vendor.paymentStatus, notes: vendor.notes || '' })));
@@ -85,8 +98,7 @@ export const bookingService = {
     if (!current) throw new Error('Booking not found');
     const totalAmount = updates.totalAmount !== undefined ? Number(updates.totalAmount || 0) : current.totalAmount;
     const advancePaid = updates.advancePaid !== undefined ? Number(updates.advancePaid || 0) : current.advancePaid;
-    const paymentStatus: Booking['paymentStatus'] = advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending';
-    const { assignedVendors, id: _id, createdAt: _createdAt, remainingAmount: _remaining, clientName: _clientName, ...updatesWithoutLocalFields } = updates;
+    const { assignedVendors, id: _id, createdAt: _createdAt, remainingAmount: _remaining, clientName: _clientName, paymentStatus: _paymentStatus, ...updatesWithoutLocalFields } = updates;
     const dbUpdates: Record<string, any> = {};
     if (updatesWithoutLocalFields.clientId !== undefined) dbUpdates.client_id = updatesWithoutLocalFields.clientId;
     if (updatesWithoutLocalFields.eventType !== undefined) dbUpdates.event_type = updatesWithoutLocalFields.eventType;
@@ -99,7 +111,7 @@ export const bookingService = {
     if (updatesWithoutLocalFields.notes !== undefined) dbUpdates.notes = updatesWithoutLocalFields.notes || '';
     dbUpdates.total_amount = totalAmount;
     dbUpdates.advance_paid = advancePaid;
-    dbUpdates.payment_status = paymentStatus;
+    // payment_status is generated from the financial columns; do not update it directly.
     const { data, error } = await supabase.from('bookings').update(dbUpdates).eq('id', id).eq('business_id', businessId).select('*').single();
     if (error) throw error;
     if (assignedVendors !== undefined) {
