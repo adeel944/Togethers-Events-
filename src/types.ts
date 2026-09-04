@@ -60,5 +60,14 @@ export interface InvoiceSettings {
   showPhone: boolean; showEmail: boolean; fontSize: TextScale; bodySize: TextScale;
   headingSize: TextScale; dateFormat: 'YYYY-MM-DD' | 'DD/MM/YYYY' | 'MM/DD/YYYY' | 'MMM DD, YYYY';
 }
+export interface BusinessExpense {
+  id: string;
+  title: string;
+  category: 'Operations' | 'Transport' | 'Staff' | 'Marketing' | 'Office' | 'Other';
+  amount: number;
+  date: string;
+  notes?: string;
+  createdAt: string;
+}
 export type NavTab = 'dashboard' | 'bookings' | 'calendar' | 'clients' | 'vendors' | 'invoices'
-  | 'settings-profile' | 'settings-invoice' | 'invoice-preview';
+  | 'finance' | 'settings-profile' | 'settings-invoice' | 'invoice-preview';
