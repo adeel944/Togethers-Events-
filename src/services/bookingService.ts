@@ -1,92 +1,254 @@
 import { Booking, BookingVendor } from '../types';
-import { initialBookings } from './mockData';
+import { supabase } from '../lib/supabase';
 
-const BOOKINGS_KEY = 'together_events_bookings';
+async function getBusinessId(): Promise<string> {
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError || !authData.user) {
+    throw new Error('You must be signed in.');
+  }
+
+  const { data, error } = await supabase
+    .from('business_members')
+    .select('business_id')
+    .eq('user_id', authData.user.id)
+    .limit(1)
+    .single();
+
+  if (error || !data?.business_id) {
+    throw new Error('No business is associated with this account.');
+  }
+
+  return data.business_id;
+}
+
+function mapBookingVendor(row: any): BookingVendor {
+  return {
+    id: row.id,
+    vendorId: row.vendor_id,
+    vendorName: row.vendor_name,
+    category: row.category,
+    agreedAmount: Number(row.agreed_amount || 0),
+    paymentStatus: row.payment_status,
+    notes: row.notes || '',
+  };
+}
+
+function mapBooking(row: any, vendorRows: any[] = []): Booking {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    clientName: row.client_name,
+    eventType: row.event_type,
+    eventDate: row.event_date,
+    eventTime: row.event_time || '',
+    venue: row.venue || '',
+    guestCount: Number(row.guest_count || 0),
+    package: row.package || '',
+    totalAmount: Number(row.total_amount || 0),
+    advancePaid: Number(row.advance_paid || 0),
+    remainingAmount: Number(row.remaining_amount || 0),
+    bookingStatus: row.booking_status,
+    paymentStatus: row.payment_status,
+    notes: row.notes || '',
+    assignedVendors: vendorRows.map(mapBookingVendor),
+    createdAt: row.created_at,
+  };
+}
+
+async function getVendorRows(bookingIds: string[]): Promise<any[]> {
+  if (!bookingIds.length) return [];
+
+  const { data, error } = await supabase
+    .from('booking_vendors')
+    .select('*')
+    .in('booking_id', bookingIds);
+
+  if (error) throw error;
+  return data || [];
+}
 
 export const bookingService = {
   async getBookings(): Promise<Booking[]> {
-    try {
-      const data = localStorage.getItem(BOOKINGS_KEY);
-      if (data) {
-        const parsed = JSON.parse(data);
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
-      }
-    } catch {
-      // ignore
-    }
-    localStorage.setItem(BOOKINGS_KEY, JSON.stringify(initialBookings));
-    return [...initialBookings];
+    const businessId = await getBusinessId();
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const rows = data || [];
+    const vendorRows = await getVendorRows(rows.map((row) => row.id));
+
+    return rows.map((row) =>
+      mapBooking(row, vendorRows.filter((vendor) => vendor.booking_id === row.id))
+    );
   },
 
   async getBookingById(id: string): Promise<Booking | null> {
-    const bookings = await this.getBookings();
-    return bookings.find((b) => b.id === id) || null;
+    const businessId = await getBusinessId();
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', id)
+      .eq('business_id', businessId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+
+    const vendorRows = await getVendorRows([id]);
+    return mapBooking(data, vendorRows);
   },
 
   async createBooking(
     payload: Omit<Booking, 'id' | 'createdAt' | 'remainingAmount'>
   ): Promise<Booking> {
-    const bookings = await this.getBookings();
-    const remainingAmount = Math.max(0, payload.totalAmount - (payload.advancePaid || 0));
-    
-    // Auto sync payment status if needed
-    let paymentStatus: Booking['paymentStatus'] = 'Pending';
-    if (payload.advancePaid >= payload.totalAmount && payload.totalAmount > 0) {
-      paymentStatus = 'Paid';
-    } else {
-      paymentStatus = 'Pending';
+    const businessId = await getBusinessId();
+    const totalAmount = Number(payload.totalAmount || 0);
+    const advancePaid = Number(payload.advancePaid || 0);
+    const remainingAmount = Math.max(0, totalAmount - advancePaid);
+    const paymentStatus: Booking['paymentStatus'] =
+      advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending';
+
+    const { assignedVendors = [], ...bookingPayload } = payload;
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .insert({
+        business_id: businessId,
+        client_id: bookingPayload.clientId,
+        client_name: bookingPayload.clientName,
+        event_type: bookingPayload.eventType,
+        event_date: bookingPayload.eventDate,
+        event_time: bookingPayload.eventTime,
+        venue: bookingPayload.venue,
+        guest_count: bookingPayload.guestCount,
+        package: bookingPayload.package,
+        total_amount: totalAmount,
+        advance_paid: advancePaid,
+        remaining_amount: remainingAmount,
+        booking_status: bookingPayload.bookingStatus,
+        payment_status: paymentStatus,
+        notes: bookingPayload.notes,
+      })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+
+    if (assignedVendors.length) {
+      const { error: vendorError } = await supabase.from('booking_vendors').insert(
+        assignedVendors.map((vendor) => ({
+          booking_id: data.id,
+          vendor_id: vendor.vendorId,
+          vendor_name: vendor.vendorName,
+          category: vendor.category,
+          agreed_amount: Number(vendor.agreedAmount || 0),
+          payment_status: vendor.paymentStatus,
+          notes: vendor.notes || '',
+        }))
+      );
+
+      if (vendorError) {
+        await supabase.from('bookings').delete().eq('id', data.id).eq('business_id', businessId);
+        throw vendorError;
+      }
     }
 
-    const newBooking: Booking = {
-      ...payload,
-      paymentStatus,
-      remainingAmount,
-      id: 'bok-' + Date.now(),
-      assignedVendors: payload.assignedVendors || [],
-      createdAt: new Date().toISOString(),
-    };
-    const updated = [newBooking, ...bookings];
-    localStorage.setItem(BOOKINGS_KEY, JSON.stringify(updated));
-    return newBooking;
+    return mapBooking(data, assignedVendors.map((vendor) => ({
+      id: vendor.id,
+      vendor_id: vendor.vendorId,
+      vendor_name: vendor.vendorName,
+      category: vendor.category,
+      agreed_amount: vendor.agreedAmount,
+      payment_status: vendor.paymentStatus,
+      notes: vendor.notes,
+    })));
   },
 
   async updateBooking(id: string, updates: Partial<Booking>): Promise<Booking> {
-    const bookings = await this.getBookings();
-    const index = bookings.findIndex((b) => b.id === id);
-    if (index === -1) {
-      throw new Error('Booking not found');
-    }
-    const current = bookings[index];
-    const totalAmount = updates.totalAmount !== undefined ? updates.totalAmount : current.totalAmount;
-    const advancePaid = updates.advancePaid !== undefined ? updates.advancePaid : current.advancePaid;
+    const businessId = await getBusinessId();
+    const current = await this.getBookingById(id);
+    if (!current) throw new Error('Booking not found');
+
+    const totalAmount = updates.totalAmount !== undefined ? Number(updates.totalAmount || 0) : current.totalAmount;
+    const advancePaid = updates.advancePaid !== undefined ? Number(updates.advancePaid || 0) : current.advancePaid;
     const remainingAmount = Math.max(0, totalAmount - advancePaid);
+    const paymentStatus: Booking['paymentStatus'] =
+      advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending';
 
-    let paymentStatus: Booking['paymentStatus'] = 'Pending';
-    if (advancePaid >= totalAmount && totalAmount > 0) {
-      paymentStatus = 'Paid';
-    } else {
-      paymentStatus = 'Pending';
+    const { assignedVendors, id: _id, createdAt: _createdAt, remainingAmount: _remaining, ...updatesWithoutLocalFields } = updates;
+
+    const dbUpdates: Record<string, any> = {};
+    if (updatesWithoutLocalFields.clientId !== undefined) dbUpdates.client_id = updatesWithoutLocalFields.clientId;
+    if (updatesWithoutLocalFields.clientName !== undefined) dbUpdates.client_name = updatesWithoutLocalFields.clientName;
+    if (updatesWithoutLocalFields.eventType !== undefined) dbUpdates.event_type = updatesWithoutLocalFields.eventType;
+    if (updatesWithoutLocalFields.eventDate !== undefined) dbUpdates.event_date = updatesWithoutLocalFields.eventDate;
+    if (updatesWithoutLocalFields.eventTime !== undefined) dbUpdates.event_time = updatesWithoutLocalFields.eventTime;
+    if (updatesWithoutLocalFields.venue !== undefined) dbUpdates.venue = updatesWithoutLocalFields.venue;
+    if (updatesWithoutLocalFields.guestCount !== undefined) dbUpdates.guest_count = updatesWithoutLocalFields.guestCount;
+    if (updatesWithoutLocalFields.package !== undefined) dbUpdates.package = updatesWithoutLocalFields.package;
+    if (updatesWithoutLocalFields.bookingStatus !== undefined) dbUpdates.booking_status = updatesWithoutLocalFields.bookingStatus;
+    if (updatesWithoutLocalFields.notes !== undefined) dbUpdates.notes = updatesWithoutLocalFields.notes;
+
+    dbUpdates.total_amount = totalAmount;
+    dbUpdates.advance_paid = advancePaid;
+    dbUpdates.remaining_amount = remainingAmount;
+    dbUpdates.payment_status = paymentStatus;
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .update(dbUpdates)
+      .eq('id', id)
+      .eq('business_id', businessId)
+      .select('*')
+      .single();
+
+    if (error) throw error;
+
+    if (assignedVendors !== undefined) {
+      const { error: deleteError } = await supabase
+        .from('booking_vendors')
+        .delete()
+        .eq('booking_id', id);
+      if (deleteError) throw deleteError;
+
+      if (assignedVendors.length) {
+        const { error: insertError } = await supabase.from('booking_vendors').insert(
+          assignedVendors.map((vendor) => ({
+            booking_id: id,
+            vendor_id: vendor.vendorId,
+            vendor_name: vendor.vendorName,
+            category: vendor.category,
+            agreed_amount: Number(vendor.agreedAmount || 0),
+            payment_status: vendor.paymentStatus,
+            notes: vendor.notes || '',
+          }))
+        );
+        if (insertError) throw insertError;
+      }
     }
 
-    const updatedBooking: Booking = {
-      ...current,
-      ...updates,
-      totalAmount,
-      advancePaid,
-      remainingAmount,
-      paymentStatus,
-    };
-    bookings[index] = updatedBooking;
-    localStorage.setItem(BOOKINGS_KEY, JSON.stringify(bookings));
-    return updatedBooking;
+    return this.getBookingById(data.id) as Promise<Booking>;
   },
 
   async deleteBooking(id: string): Promise<boolean> {
-    const bookings = await this.getBookings();
-    const filtered = bookings.filter((b) => b.id !== id);
-    localStorage.setItem(BOOKINGS_KEY, JSON.stringify(filtered));
+    const businessId = await getBusinessId();
+    const { error: vendorError } = await supabase
+      .from('booking_vendors')
+      .delete()
+      .eq('booking_id', id);
+    if (vendorError) throw vendorError;
+
+    const { error } = await supabase
+      .from('bookings')
+      .delete()
+      .eq('id', id)
+      .eq('business_id', businessId);
+
+    if (error) throw error;
     return true;
   },
 
@@ -96,12 +258,24 @@ export const bookingService = {
   ): Promise<Booking> {
     const booking = await this.getBookingById(bookingId);
     if (!booking) throw new Error('Booking not found');
-    const newBookingVendor: BookingVendor = {
-      ...vendorData,
-      id: 'bv-' + Date.now(),
-    };
-    const updatedAssigned = [...booking.assignedVendors, newBookingVendor];
-    return this.updateBooking(bookingId, { assignedVendors: updatedAssigned });
+
+    const { data, error } = await supabase
+      .from('booking_vendors')
+      .insert({
+        booking_id: bookingId,
+        vendor_id: vendorData.vendorId,
+        vendor_name: vendorData.vendorName,
+        category: vendorData.category,
+        agreed_amount: Number(vendorData.agreedAmount || 0),
+        payment_status: vendorData.paymentStatus,
+        notes: vendorData.notes || '',
+      })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    if (!data) throw new Error('Vendor assignment failed');
+    return this.getBookingById(bookingId) as Promise<Booking>;
   },
 
   async assignVendor(bookingId: string, vendorData: Omit<BookingVendor, 'id'>): Promise<Booking> {
@@ -111,8 +285,15 @@ export const bookingService = {
   async removeVendorFromBooking(bookingId: string, bookingVendorId: string): Promise<Booking> {
     const booking = await this.getBookingById(bookingId);
     if (!booking) throw new Error('Booking not found');
-    const updatedAssigned = booking.assignedVendors.filter((v) => v.id !== bookingVendorId);
-    return this.updateBooking(bookingId, { assignedVendors: updatedAssigned });
+
+    const { error } = await supabase
+      .from('booking_vendors')
+      .delete()
+      .eq('id', bookingVendorId)
+      .eq('booking_id', bookingId);
+
+    if (error) throw error;
+    return this.getBookingById(bookingId) as Promise<Booking>;
   },
 
   async removeAssignedVendor(bookingId: string, bookingVendorId: string): Promise<Booking> {
