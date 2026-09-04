@@ -14,7 +14,19 @@ async function getBusinessId(): Promise<string> {
 }
 
 function mapItem(row: any): InvoiceItem { return { id: row.id, description: row.description || '', quantity: Number(row.quantity || 0), unitPrice: Number(row.unit_price || 0), total: Number(row.total || 0) }; }
-function mapInvoice(row: any, items: InvoiceItem[] = []): Invoice { return { id: row.id, invoiceNumber: row.invoice_number, documentTitle: row.document_title || undefined, bookingId: row.booking_id || undefined, clientId: row.client_id, clientName: row.client_name || '', clientPhone: row.client_phone || '', clientWhatsApp: row.client_whatsapp || '', clientEmail: row.client_email || '', billingAddress: row.billing_address || '', eventType: row.event_type, eventDate: row.event_date, eventTime: row.event_time || undefined, venue: row.venue || '', issueDate: row.issue_date, dueDate: row.due_date || undefined, items, subtotal: Number(row.subtotal || 0), discount: Number(row.discount || 0), tax: Number(row.tax || 0), totalAmount: Number(row.total_amount || 0), advancePaid: Number(row.advance_paid || 0), remainingBalance: Number(row.remaining_balance || 0), paymentStatus: row.payment_status === 'Paid' ? 'Paid' : 'Pending', notes: row.notes || '', termsAndConditions: row.terms_and_conditions || '', templateId: row.template_id || 'modern', createdAt: row.created_at }; }
+function mapInvoice(row: any, items: InvoiceItem[] = []): Invoice {
+  const itemTotal = items.reduce((sum, item) => sum + Number(item.total || item.quantity * item.unitPrice || 0), 0);
+  const subtotal = Number(row.subtotal ?? itemTotal ?? 0);
+  const discount = Number(row.discount ?? 0);
+  const tax = Number(row.tax ?? 0);
+  const calculatedTotal = subtotal - discount + tax;
+  const storedTotal = Number(row.total_amount ?? 0);
+  const totalAmount = storedTotal > 0 || calculatedTotal <= 0 ? storedTotal : calculatedTotal;
+  const advancePaid = Number(row.advance_paid ?? 0);
+  const storedRemaining = Number(row.remaining_balance ?? 0);
+  const remainingBalance = storedRemaining || Math.max(totalAmount - advancePaid, 0);
+  return { id: row.id, invoiceNumber: row.invoice_number, documentTitle: row.document_title || undefined, bookingId: row.booking_id || undefined, clientId: row.client_id, clientName: row.client_name || '', clientPhone: row.client_phone || '', clientWhatsApp: row.client_whatsapp || '', clientEmail: row.client_email || '', billingAddress: row.billing_address || '', eventType: row.event_type, eventDate: row.event_date, eventTime: row.event_time || undefined, venue: row.venue || '', issueDate: row.issue_date, dueDate: row.due_date || undefined, items, subtotal, discount, tax, totalAmount, advancePaid, remainingBalance, paymentStatus: row.payment_status === 'Paid' ? 'Paid' : 'Pending', notes: row.notes || '', termsAndConditions: row.terms_and_conditions || '', templateId: row.template_id || 'modern', createdAt: row.created_at };
+}
 
 async function loadItems(invoiceIds: string[]): Promise<Map<string, InvoiceItem[]>> {
   const map = new Map<string, InvoiceItem[]>(); if (!invoiceIds.length) return map;
