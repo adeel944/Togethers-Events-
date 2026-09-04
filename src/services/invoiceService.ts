@@ -37,9 +37,12 @@ async function loadItems(invoiceIds: string[]): Promise<Map<string, InvoiceItem[
 async function replaceItems(invoiceId: string, items: InvoiceItem[]) {
   const { error: deleteError } = await supabase.from('invoice_items').delete().eq('invoice_id', invoiceId); if (deleteError) throw deleteError;
   if (!items.length) return;
-  const rows = items.map((item) => ({ invoice_id: invoiceId, description: String(item.description || '').trim(), quantity: Math.max(1, Number(item.quantity) || 1), unit_price: Math.max(0, Number(item.unitPrice) || 0) }));
+  const rows = items.map((item) => ({ invoice_id: invoiceId, description: String(item.description || '').trim() || 'Custom Service', quantity: Math.max(1, Number(item.quantity) || 1), unit_price: Math.max(0, Number(item.unitPrice) || 0) }));
   const { error } = await supabase.from('invoice_items').insert(rows); if (error) throw error;
 }
+
+const DB_EVENT_TYPES = new Set(['Baraat', 'Walima', 'Mehendi', 'Nikkah', 'Birthday', 'Corporate', 'Other']);
+function normalizeEventType(value: unknown): string { const eventType = String(value || '').trim(); return DB_EVENT_TYPES.has(eventType) ? eventType : 'Other'; }
 
 export const invoiceService = {
   async getInvoices(): Promise<Invoice[]> { const businessId = await getBusinessId(); const { data, error } = await supabase.from('invoices').select('*').eq('business_id', businessId).order('created_at', { ascending: false }); if (error) throw error; const rows = data || []; const itemMap = await loadItems(rows.map((row) => row.id)); return rows.map((row) => mapInvoice(row, itemMap.get(row.id) || [])); },
@@ -47,7 +50,7 @@ export const invoiceService = {
   async generateNextInvoiceNumber(): Promise<string> { const profile = await businessService.getProfile(); const businessId = await getBusinessId(); const prefix = profile.invoicePrefix || 'TE-'; const startingNumber = profile.invoiceStartingNumber || 1001; const { data, error } = await supabase.from('invoices').select('invoice_number').eq('business_id', businessId); if (error) throw error; let maxNum = startingNumber - 1; for (const row of data || []) { const value = String(row.invoice_number || ''); if (value.startsWith(prefix)) { const num = parseInt(value.slice(prefix.length), 10); if (!Number.isNaN(num) && num > maxNum) maxNum = num; } } return `${prefix}${maxNum + 1}`; },
   async createInvoice(payload: Omit<Invoice, 'id' | 'createdAt'>): Promise<Invoice> {
     const businessId = await getBusinessId();
-    const items = (payload.items || []).map((item) => ({ ...item, description: String(item.description || '').trim(), quantity: Math.max(1, Number(item.quantity) || 1), unitPrice: Math.max(0, Number(item.unitPrice) || 0) }));
+    const items = (payload.items || []).map((item) => ({ ...item, description: String(item.description || '').trim() || 'Custom Service', quantity: Math.max(1, Number(item.quantity) || 1), unitPrice: Math.max(0, Number(item.unitPrice) || 0) }));
     const subtotal = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
     const discount = Math.max(0, Number(payload.discount) || 0);
     const tax = Math.max(0, Number(payload.tax) || 0);
@@ -58,56 +61,22 @@ export const invoiceService = {
     if (!invoiceNumber) throw new Error('Invoice number is required.');
     if (!clientName) throw new Error('Client name is required.');
     if (!items.length) throw new Error('At least one invoice item is required.');
-
-    // The form intentionally keeps Event Type/Date visually blank. The database may require
-    // these columns, so use harmless internal defaults without changing what the user sees.
-    const dbEventType = String(payload.eventType || '').trim() || 'Other';
+    const dbEventType = normalizeEventType(payload.eventType);
     const dbEventDate = String(payload.eventDate || '').trim() || String(payload.issueDate || today);
-
-    const { data, error } = await supabase.from('invoices').insert({
-      business_id: businessId,
-      invoice_number: invoiceNumber,
-      document_title: payload.documentTitle || 'BOOKING CONFIRMATION',
-      booking_id: payload.bookingId || null,
-      client_id: payload.clientId || null,
-      client_name: clientName,
-      client_phone: payload.clientPhone || '',
-      client_whatsapp: payload.clientWhatsApp || '',
-      client_email: payload.clientEmail || '',
-      billing_address: payload.billingAddress || '',
-      event_type: dbEventType,
-      event_date: dbEventDate,
-      event_time: payload.eventTime || null,
-      venue: payload.venue || '',
-      issue_date: payload.issueDate || today,
-      due_date: payload.dueDate || null,
-      subtotal,
-      discount,
-      tax,
-      advance_paid: advancePaid,
-      notes: payload.notes || '',
-      terms_and_conditions: payload.termsAndConditions || '',
-      template_id: payload.templateId || 'modern'
-    }).select('*').single();
+    const { data, error } = await supabase.from('invoices').insert({ business_id: businessId, invoice_number: invoiceNumber, document_title: payload.documentTitle || 'BOOKING CONFIRMATION', booking_id: payload.bookingId || null, client_id: payload.clientId || null, client_name: clientName, client_phone: payload.clientPhone || '', client_whatsapp: payload.clientWhatsApp || '', client_email: payload.clientEmail || '', billing_address: payload.billingAddress || '', event_type: dbEventType, event_date: dbEventDate, event_time: payload.eventTime || null, venue: payload.venue || '', issue_date: payload.issueDate || today, due_date: payload.dueDate || null, subtotal, discount, tax, advance_paid: advancePaid, notes: payload.notes || '', terms_and_conditions: payload.termsAndConditions || '', template_id: payload.templateId || 'modern' }).select('*').single();
     if (error) throw error;
-    try {
-      await replaceItems(data.id, items);
-    } catch (itemError) {
-      await supabase.from('invoices').delete().eq('id', data.id).eq('business_id', businessId);
-      throw itemError;
-    }
-    const itemMap = await loadItems([data.id]);
-    return mapInvoice(data, itemMap.get(data.id) || items);
+    try { await replaceItems(data.id, items); } catch (itemError) { await supabase.from('invoices').delete().eq('id', data.id).eq('business_id', businessId); throw itemError; }
+    const itemMap = await loadItems([data.id]); return mapInvoice(data, itemMap.get(data.id) || items);
   },
   async updateInvoice(id: string, updates: Partial<Invoice>): Promise<Invoice> {
     const current = await this.getInvoiceById(id); if (!current) throw new Error('Invoice not found');
-    const items = (updates.items || current.items).map((item) => ({ ...item, description: String(item.description || '').trim(), quantity: Math.max(1, Number(item.quantity) || 1), unitPrice: Math.max(0, Number(item.unitPrice) || 0) }));
+    const items = (updates.items || current.items).map((item) => ({ ...item, description: String(item.description || '').trim() || 'Custom Service', quantity: Math.max(1, Number(item.quantity) || 1), unitPrice: Math.max(0, Number(item.unitPrice) || 0) }));
     const subtotal = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
     const discount = updates.discount !== undefined ? Math.max(0, Number(updates.discount) || 0) : current.discount;
     const tax = updates.tax !== undefined ? Math.max(0, Number(updates.tax) || 0) : current.tax;
     const advancePaid = updates.advancePaid !== undefined ? Math.max(0, Number(updates.advancePaid) || 0) : current.advancePaid;
     const businessId = await getBusinessId();
-    const dbUpdates: Record<string, any> = { ...(updates.invoiceNumber !== undefined && { invoice_number: String(updates.invoiceNumber || '').trim() }), ...(updates.documentTitle !== undefined && { document_title: updates.documentTitle }), ...(updates.bookingId !== undefined && { booking_id: updates.bookingId || null }), ...(updates.clientId !== undefined && { client_id: updates.clientId || null }), ...(updates.clientName !== undefined && { client_name: updates.clientName || '' }), ...(updates.clientPhone !== undefined && { client_phone: updates.clientPhone || '' }), ...(updates.clientWhatsApp !== undefined && { client_whatsapp: updates.clientWhatsApp || '' }), ...(updates.clientEmail !== undefined && { client_email: updates.clientEmail || '' }), ...(updates.billingAddress !== undefined && { billing_address: updates.billingAddress || '' }), ...(updates.eventType !== undefined && { event_type: updates.eventType || 'Other' }), ...(updates.eventDate !== undefined && { event_date: updates.eventDate || current.issueDate || new Date().toISOString().split('T')[0] }), ...(updates.eventTime !== undefined && { event_time: updates.eventTime || null }), ...(updates.venue !== undefined && { venue: updates.venue || '' }), ...(updates.issueDate !== undefined && { issue_date: updates.issueDate || new Date().toISOString().split('T')[0] }), ...(updates.dueDate !== undefined && { due_date: updates.dueDate || null }), ...(updates.notes !== undefined && { notes: updates.notes || '' }), ...(updates.termsAndConditions !== undefined && { terms_and_conditions: updates.termsAndConditions || '' }), ...(updates.templateId !== undefined && { template_id: updates.templateId }), subtotal, discount, tax, advance_paid: advancePaid };
+    const dbUpdates: Record<string, any> = { ...(updates.invoiceNumber !== undefined && { invoice_number: String(updates.invoiceNumber || '').trim() }), ...(updates.documentTitle !== undefined && { document_title: updates.documentTitle }), ...(updates.bookingId !== undefined && { booking_id: updates.bookingId || null }), ...(updates.clientId !== undefined && { client_id: updates.clientId || null }), ...(updates.clientName !== undefined && { client_name: updates.clientName || '' }), ...(updates.clientPhone !== undefined && { client_phone: updates.clientPhone || '' }), ...(updates.clientWhatsApp !== undefined && { client_whatsapp: updates.clientWhatsApp || '' }), ...(updates.clientEmail !== undefined && { client_email: updates.clientEmail || '' }), ...(updates.billingAddress !== undefined && { billing_address: updates.billingAddress || '' }), ...(updates.eventType !== undefined && { event_type: normalizeEventType(updates.eventType) }), ...(updates.eventDate !== undefined && { event_date: updates.eventDate || current.issueDate || new Date().toISOString().split('T')[0] }), ...(updates.eventTime !== undefined && { event_time: updates.eventTime || null }), ...(updates.venue !== undefined && { venue: updates.venue || '' }), ...(updates.issueDate !== undefined && { issue_date: updates.issueDate || new Date().toISOString().split('T')[0] }), ...(updates.dueDate !== undefined && { due_date: updates.dueDate || null }), ...(updates.notes !== undefined && { notes: updates.notes || '' }), ...(updates.termsAndConditions !== undefined && { terms_and_conditions: updates.termsAndConditions || '' }), ...(updates.templateId !== undefined && { template_id: updates.templateId }), subtotal, discount, tax, advance_paid: advancePaid };
     const { data, error } = await supabase.from('invoices').update(dbUpdates).eq('id', id).eq('business_id', businessId).select('*').single(); if (error) throw error;
     if (updates.items !== undefined) await replaceItems(id, items);
     const itemMap = await loadItems([id]); return mapInvoice(data, itemMap.get(id) || items);
