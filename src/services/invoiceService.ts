@@ -54,10 +54,41 @@ export const invoiceService = {
     const advancePaid = Math.max(0, Number(payload.advancePaid) || 0);
     const today = new Date().toISOString().split('T')[0];
     const invoiceNumber = String(payload.invoiceNumber || '').trim();
+    const clientName = String(payload.clientName || '').trim();
     if (!invoiceNumber) throw new Error('Invoice number is required.');
-    if (!String(payload.clientName || '').trim()) throw new Error('Client name is required.');
+    if (!clientName) throw new Error('Client name is required.');
     if (!items.length) throw new Error('At least one invoice item is required.');
-    const { data, error } = await supabase.from('invoices').insert({ business_id: businessId, invoice_number: invoiceNumber, document_title: payload.documentTitle || 'BOOKING CONFIRMATION', booking_id: payload.bookingId || null, client_id: payload.clientId || null, client_name: String(payload.clientName || '').trim(), client_phone: payload.clientPhone || '', client_whatsapp: payload.clientWhatsApp || '', client_email: payload.clientEmail || '', billing_address: payload.billingAddress || '', event_type: payload.eventType || null, event_date: payload.eventDate || null, event_time: payload.eventTime || null, venue: payload.venue || '', issue_date: payload.issueDate || today, due_date: payload.dueDate || null, subtotal, discount, tax, advance_paid: advancePaid, notes: payload.notes || '', terms_and_conditions: payload.termsAndConditions || '', template_id: payload.templateId || 'modern' }).select('*').single();
+
+    // The form intentionally keeps Event Type/Date visually blank. The database may require
+    // these columns, so use harmless internal defaults without changing what the user sees.
+    const dbEventType = String(payload.eventType || '').trim() || 'Other';
+    const dbEventDate = String(payload.eventDate || '').trim() || String(payload.issueDate || today);
+
+    const { data, error } = await supabase.from('invoices').insert({
+      business_id: businessId,
+      invoice_number: invoiceNumber,
+      document_title: payload.documentTitle || 'BOOKING CONFIRMATION',
+      booking_id: payload.bookingId || null,
+      client_id: payload.clientId || null,
+      client_name: clientName,
+      client_phone: payload.clientPhone || '',
+      client_whatsapp: payload.clientWhatsApp || '',
+      client_email: payload.clientEmail || '',
+      billing_address: payload.billingAddress || '',
+      event_type: dbEventType,
+      event_date: dbEventDate,
+      event_time: payload.eventTime || null,
+      venue: payload.venue || '',
+      issue_date: payload.issueDate || today,
+      due_date: payload.dueDate || null,
+      subtotal,
+      discount,
+      tax,
+      advance_paid: advancePaid,
+      notes: payload.notes || '',
+      terms_and_conditions: payload.termsAndConditions || '',
+      template_id: payload.templateId || 'modern'
+    }).select('*').single();
     if (error) throw error;
     try {
       await replaceItems(data.id, items);
@@ -76,7 +107,7 @@ export const invoiceService = {
     const tax = updates.tax !== undefined ? Math.max(0, Number(updates.tax) || 0) : current.tax;
     const advancePaid = updates.advancePaid !== undefined ? Math.max(0, Number(updates.advancePaid) || 0) : current.advancePaid;
     const businessId = await getBusinessId();
-    const dbUpdates: Record<string, any> = { ...(updates.invoiceNumber !== undefined && { invoice_number: String(updates.invoiceNumber || '').trim() }), ...(updates.documentTitle !== undefined && { document_title: updates.documentTitle }), ...(updates.bookingId !== undefined && { booking_id: updates.bookingId || null }), ...(updates.clientId !== undefined && { client_id: updates.clientId || null }), ...(updates.clientName !== undefined && { client_name: updates.clientName || '' }), ...(updates.clientPhone !== undefined && { client_phone: updates.clientPhone || '' }), ...(updates.clientWhatsApp !== undefined && { client_whatsapp: updates.clientWhatsApp || '' }), ...(updates.clientEmail !== undefined && { client_email: updates.clientEmail || '' }), ...(updates.billingAddress !== undefined && { billing_address: updates.billingAddress || '' }), ...(updates.eventType !== undefined && { event_type: updates.eventType || null }), ...(updates.eventDate !== undefined && { event_date: updates.eventDate || null }), ...(updates.eventTime !== undefined && { event_time: updates.eventTime || null }), ...(updates.venue !== undefined && { venue: updates.venue || '' }), ...(updates.issueDate !== undefined && { issue_date: updates.issueDate || new Date().toISOString().split('T')[0] }), ...(updates.dueDate !== undefined && { due_date: updates.dueDate || null }), ...(updates.notes !== undefined && { notes: updates.notes || '' }), ...(updates.termsAndConditions !== undefined && { terms_and_conditions: updates.termsAndConditions || '' }), ...(updates.templateId !== undefined && { template_id: updates.templateId }), subtotal, discount, tax, advance_paid: advancePaid };
+    const dbUpdates: Record<string, any> = { ...(updates.invoiceNumber !== undefined && { invoice_number: String(updates.invoiceNumber || '').trim() }), ...(updates.documentTitle !== undefined && { document_title: updates.documentTitle }), ...(updates.bookingId !== undefined && { booking_id: updates.bookingId || null }), ...(updates.clientId !== undefined && { client_id: updates.clientId || null }), ...(updates.clientName !== undefined && { client_name: updates.clientName || '' }), ...(updates.clientPhone !== undefined && { client_phone: updates.clientPhone || '' }), ...(updates.clientWhatsApp !== undefined && { client_whatsapp: updates.clientWhatsApp || '' }), ...(updates.clientEmail !== undefined && { client_email: updates.clientEmail || '' }), ...(updates.billingAddress !== undefined && { billing_address: updates.billingAddress || '' }), ...(updates.eventType !== undefined && { event_type: updates.eventType || 'Other' }), ...(updates.eventDate !== undefined && { event_date: updates.eventDate || current.issueDate || new Date().toISOString().split('T')[0] }), ...(updates.eventTime !== undefined && { event_time: updates.eventTime || null }), ...(updates.venue !== undefined && { venue: updates.venue || '' }), ...(updates.issueDate !== undefined && { issue_date: updates.issueDate || new Date().toISOString().split('T')[0] }), ...(updates.dueDate !== undefined && { due_date: updates.dueDate || null }), ...(updates.notes !== undefined && { notes: updates.notes || '' }), ...(updates.termsAndConditions !== undefined && { terms_and_conditions: updates.termsAndConditions || '' }), ...(updates.templateId !== undefined && { template_id: updates.templateId }), subtotal, discount, tax, advance_paid: advancePaid };
     const { data, error } = await supabase.from('invoices').update(dbUpdates).eq('id', id).eq('business_id', businessId).select('*').single(); if (error) throw error;
     if (updates.items !== undefined) await replaceItems(id, items);
     const itemMap = await loadItems([id]); return mapInvoice(data, itemMap.get(id) || items);
