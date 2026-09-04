@@ -6,10 +6,21 @@ import { invoiceService } from './invoiceService';
 export async function createInvoiceWithBooking(
   invoiceData: Omit<Invoice, 'id' | 'createdAt'>
 ): Promise<{ invoice: Invoice; booking: Booking }> {
-  const firstItem = invoiceData.items?.[0];
-  const packageName = firstItem?.description?.trim() || 'Custom Package';
-  const totalAmount = Math.max(0, Number(invoiceData.totalAmount || 0));
-  const advancePaid = Math.max(0, Number(invoiceData.advancePaid || 0));
+  // Always calculate the amount from the values currently entered in the form.
+  // Do not trust a stale totalAmount/item.total coming from an earlier render.
+  const normalizedItems = (invoiceData.items || []).map((item) => ({
+    ...item,
+    quantity: Number(item.quantity) || 0,
+    unitPrice: Number(item.unitPrice) || 0,
+    total: (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0),
+  }));
+
+  const subtotal = normalizedItems.reduce((sum, item) => sum + item.total, 0);
+  const discount = Math.max(0, Number(invoiceData.discount) || 0);
+  const tax = Math.max(0, Number(invoiceData.tax) || 0);
+  const totalAmount = Math.max(0, subtotal - discount + tax);
+  const advancePaid = Math.max(0, Number(invoiceData.advancePaid) || 0);
+  const packageName = normalizedItems[0]?.description?.trim() || 'Custom Package';
 
   const booking = await bookingService.createBooking({
     clientId: invoiceData.clientId,
@@ -31,7 +42,9 @@ export async function createInvoiceWithBooking(
   try {
     const invoice = await invoiceService.createInvoice({
       ...invoiceData,
+      items: normalizedItems,
       bookingId: booking.id,
+      subtotal,
       totalAmount,
       remainingBalance: Math.max(0, totalAmount - advancePaid),
     });
