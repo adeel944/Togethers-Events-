@@ -161,10 +161,8 @@ export const invoiceService = {
     );
     const discount = Number(payload.discount || 0);
     const tax = Number(payload.tax || 0);
-    const totalAmount = Math.max(0, subtotal - discount + tax);
     const advancePaid = Number(payload.advancePaid || 0);
-    const remainingBalance = Math.max(0, totalAmount - advancePaid);
-    const paymentStatus = advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending';
+    const paymentStatus = advancePaid >= Math.max(0, subtotal - discount + tax) && subtotal > 0 ? 'Paid' : 'Pending';
 
     const { data, error } = await supabase
       .from('invoices')
@@ -189,7 +187,6 @@ export const invoiceService = {
         discount,
         tax,
         advance_paid: advancePaid,
-        remaining_balance: remainingBalance,
         payment_status: paymentStatus,
         notes: payload.notes || '',
         terms_and_conditions: payload.termsAndConditions || '',
@@ -214,10 +211,8 @@ export const invoiceService = {
     );
     const discount = updates.discount !== undefined ? Number(updates.discount) : current.discount;
     const tax = updates.tax !== undefined ? Number(updates.tax) : current.tax;
-    const totalAmount = Math.max(0, subtotal - discount + tax);
     const advancePaid = updates.advancePaid !== undefined ? Number(updates.advancePaid) : current.advancePaid;
-    const remainingBalance = Math.max(0, totalAmount - advancePaid);
-    const paymentStatus = advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending';
+    const paymentStatus = advancePaid >= Math.max(0, subtotal - discount + tax) && subtotal > 0 ? 'Paid' : 'Pending';
     const businessId = await getBusinessId();
 
     const dbUpdates: Record<string, any> = {
@@ -243,7 +238,6 @@ export const invoiceService = {
       discount,
       tax,
       advance_paid: advancePaid,
-      remaining_balance: remainingBalance,
       payment_status: paymentStatus,
     };
 
