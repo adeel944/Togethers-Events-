@@ -8,10 +8,7 @@ import {
   Vendor,
   Invoice
 } from './types';
-import {
-  initialBusinessProfile,
-  initialInvoiceSettings,
-} from './services/mockData';
+import { initialBusinessProfile, initialInvoiceSettings } from './services/mockData';
 import { businessService } from './services/businessService';
 import { bookingService } from './services/bookingService';
 import { clientService } from './services/clientService';
@@ -55,37 +52,58 @@ export default function App() {
     const [p, s, b, c, v, i] = results;
     if (p.status === 'fulfilled') setProfile(p.value || initialBusinessProfile); else console.error('Error loading business profile:', p.reason);
     if (s.status === 'fulfilled') setSettings(s.value || initialInvoiceSettings); else console.error('Error loading invoice settings:', s.reason);
-    if (b.status === 'fulfilled') setBookings(Array.isArray(b.value) ? b.value : []); else console.error('Error loading bookings:', b.reason);
+    if (b.status === 'fulfilled' && Array.isArray(b.value)) setBookings(b.value);
+    else if (b.status === 'rejected') console.error('Error loading bookings:', b.reason);
     if (c.status === 'fulfilled') setClients(Array.isArray(c.value) ? c.value : []); else console.error('Error loading clients:', c.reason);
     if (v.status === 'fulfilled') setVendors(Array.isArray(v.value) ? v.value : []); else console.error('Error loading vendors:', v.reason);
     if (i.status === 'fulfilled') setInvoices(Array.isArray(i.value) ? i.value : []); else console.error('Error loading invoices:', i.reason);
   };
 
-  useEffect(() => { refreshAll(); }, []);
+  useEffect(() => { void refreshAll(); }, []);
+
+  const refreshBookingsWithoutLosingCreated = async (created?: Booking) => {
+    try {
+      const fresh = await bookingService.getBookings();
+      if (fresh.length > 0) {
+        setBookings(fresh);
+        return fresh;
+      }
+    } catch (error) {
+      console.error('Error refreshing bookings:', error);
+    }
+    if (created) {
+      setBookings((current) => {
+        const existingIndex = current.findIndex((booking) => booking.id === created.id);
+        if (existingIndex >= 0) return current.map((booking) => booking.id === created.id ? created : booking);
+        return [created, ...current];
+      });
+    }
+    return null;
+  };
 
   const handleCreateBooking = async (bookingData: Omit<Booking, 'id' | 'createdAt' | 'remainingAmount'>) => {
     const created = await bookingService.createBooking(bookingData);
-    setBookings(await bookingService.getBookings());
+    await refreshBookingsWithoutLosingCreated(created);
     return created;
   };
   const handleUpdateBooking = async (id: string, updates: Partial<Booking>) => {
     const updated = await bookingService.updateBooking(id, updates);
-    setBookings(await bookingService.getBookings());
+    await refreshBookingsWithoutLosingCreated(updated);
     return updated;
   };
   const handleDeleteBooking = async (id: string) => {
     const res = await bookingService.deleteBooking(id);
-    setBookings(await bookingService.getBookings());
+    setBookings((current) => current.filter((booking) => booking.id !== id));
     return res;
   };
   const handleAssignVendor = async (bookingId: string, vendorData: any) => {
     const updated = await bookingService.assignVendor(bookingId, vendorData);
-    setBookings(await bookingService.getBookings());
+    await refreshBookingsWithoutLosingCreated(updated);
     return updated;
   };
   const handleRemoveVendor = async (bookingId: string, bookingVendorId: string) => {
     const updated = await bookingService.removeAssignedVendor(bookingId, bookingVendorId);
-    setBookings(await bookingService.getBookings());
+    await refreshBookingsWithoutLosingCreated(updated);
     return updated;
   };
   const handleCreateInvoiceFromBooking = async (bookingId: string) => {
@@ -160,14 +178,12 @@ export default function App() {
     return saved;
   };
 
-  // Refresh live booking data whenever the user enters Dashboard, Bookings or Calendar.
-  // This prevents a stale in-memory list from showing zero while the database has a booking.
+  // Keep one shared booking state across Dashboard, Bookings and Calendar.
+  // Do not reload and overwrite that state merely by changing tabs; a transient
+  // empty Supabase response must never make an existing booking disappear.
   const handleTabChange = (tab: NavTab) => {
     setCurrentTab(tab);
     setPreviewInvoice(null);
-    if (tab === 'dashboard' || tab === 'bookings' || tab === 'calendar') {
-      void refreshAll();
-    }
   };
 
   const handleSelectBookingFromAnywhere = (booking: Booking) => {
