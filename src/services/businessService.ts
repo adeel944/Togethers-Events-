@@ -41,7 +41,12 @@ function mapProfile(row: any): BusinessProfile {
     currencySymbol: row.currency_symbol || 'AED',
     invoicePrefix: row.invoice_prefix || 'TE-',
     invoiceStartingNumber: Number(row.invoice_starting_number || 1001),
-    bankDetails: row.bank_details || undefined,
+    bankDetails: row.bank_details || {
+      bankName: '',
+      accountTitle: '',
+      accountNumber: '',
+      iban: '',
+    },
   };
 }
 
