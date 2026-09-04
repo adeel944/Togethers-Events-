@@ -37,7 +37,17 @@ export const clientService = {
       if (duplicateError) throw new Error(duplicateError.message);
       if (existing) return mapClient(existing);
     }
-    const { data, error } = await supabase.from('clients').insert({ business_id: businessId, full_name: payload.fullName, phone: payload.phone || null, whatsapp: payload.whatsApp || null, email: payload.email || null, billing_address: payload.billingAddress || null, city: payload.city || null, country: payload.country || null, notes: payload.notes || null }).select('*').single();
+    const { data, error } = await supabase.from('clients').insert({
+      business_id: businessId,
+      full_name: payload.fullName,
+      phone: payload.phone || '',
+      whatsapp: payload.whatsApp || '',
+      email: payload.email || '',
+      billing_address: payload.billingAddress || '',
+      city: payload.city || '',
+      country: payload.country || '',
+      notes: payload.notes || ''
+    }).select('*').single();
     if (error) throw new Error(error.message);
     return mapClient(data);
   },
@@ -46,13 +56,13 @@ export const clientService = {
     const businessId = await getBusinessId();
     const dbUpdates: Record<string, any> = {};
     if (updates.fullName !== undefined) dbUpdates.full_name = updates.fullName;
-    if (updates.phone !== undefined) dbUpdates.phone = updates.phone || null;
-    if (updates.whatsApp !== undefined) dbUpdates.whatsapp = updates.whatsApp || null;
-    if (updates.email !== undefined) dbUpdates.email = updates.email || null;
-    if (updates.billingAddress !== undefined) dbUpdates.billing_address = updates.billingAddress || null;
-    if (updates.city !== undefined) dbUpdates.city = updates.city || null;
-    if (updates.country !== undefined) dbUpdates.country = updates.country || null;
-    if (updates.notes !== undefined) dbUpdates.notes = updates.notes || null;
+    if (updates.phone !== undefined) dbUpdates.phone = updates.phone || '';
+    if (updates.whatsApp !== undefined) dbUpdates.whatsapp = updates.whatsApp || '';
+    if (updates.email !== undefined) dbUpdates.email = updates.email || '';
+    if (updates.billingAddress !== undefined) dbUpdates.billing_address = updates.billingAddress || '';
+    if (updates.city !== undefined) dbUpdates.city = updates.city || '';
+    if (updates.country !== undefined) dbUpdates.country = updates.country || '';
+    if (updates.notes !== undefined) dbUpdates.notes = updates.notes || '';
     const { data, error } = await supabase.from('clients').update(dbUpdates).eq('id', id).eq('business_id', businessId).select('*').single();
     if (error) throw new Error(error.message);
     return mapClient(data);
