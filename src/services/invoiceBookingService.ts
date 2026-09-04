@@ -6,8 +6,6 @@ import { invoiceService } from './invoiceService';
 export async function createInvoiceWithBooking(
   invoiceData: Omit<Invoice, 'id' | 'createdAt'>
 ): Promise<{ invoice: Invoice; booking: Booking }> {
-  // Always calculate the amount from the values currently entered in the form.
-  // Do not trust a stale totalAmount/item.total coming from an earlier render.
   const normalizedItems = (invoiceData.items || []).map((item) => ({
     ...item,
     quantity: Number(item.quantity) || 0,
@@ -22,38 +20,50 @@ export async function createInvoiceWithBooking(
   const advancePaid = Math.max(0, Number(invoiceData.advancePaid) || 0);
   const packageName = normalizedItems[0]?.description?.trim() || 'Custom Package';
 
-  const booking = await bookingService.createBooking({
-    clientId: invoiceData.clientId,
-    clientName: invoiceData.clientName,
-    eventType: invoiceData.eventType,
-    eventDate: invoiceData.eventDate,
-    eventTime: invoiceData.eventTime || '',
-    venue: invoiceData.venue || '',
-    guestCount: Math.max(0, Number(invoiceData.guestCount || 0)),
-    package: packageName,
-    totalAmount,
-    advancePaid,
-    bookingStatus: 'Confirmed',
-    paymentStatus: advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending',
-    notes: invoiceData.notes || '',
-    assignedVendors: [],
-  });
-
+  // Create the invoice first. This guarantees that Save Invoice is not blocked
+  // by the secondary linked-booking operation.
+  let invoice: Invoice;
   try {
-    const invoice = await invoiceService.createInvoice({
+    invoice = await invoiceService.createInvoice({
       ...invoiceData,
       items: normalizedItems,
-      bookingId: booking.id,
+      bookingId: undefined,
       subtotal,
       totalAmount,
       remainingBalance: Math.max(0, totalAmount - advancePaid),
     });
-    return { invoice, booking };
   } catch (error) {
+    console.error('Invoice creation failed:', error);
+    throw error;
+  }
+
+  try {
+    const booking = await bookingService.createBooking({
+      clientId: invoiceData.clientId,
+      clientName: invoiceData.clientName,
+      eventType: invoiceData.eventType,
+      eventDate: invoiceData.eventDate,
+      eventTime: invoiceData.eventTime || '',
+      venue: invoiceData.venue || '',
+      guestCount: Math.max(0, Number((invoiceData as any).guestCount || 0)),
+      package: packageName,
+      totalAmount,
+      advancePaid,
+      bookingStatus: 'Confirmed',
+      paymentStatus: advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending',
+      notes: invoiceData.notes || '',
+      assignedVendors: [],
+    });
+
+    // Link the already-saved invoice to its booking.
+    const linkedInvoice = await invoiceService.updateInvoice(invoice.id, { bookingId: booking.id });
+    return { invoice: linkedInvoice, booking };
+  } catch (error) {
+    console.error('Linked booking creation failed; rolling back invoice:', error);
     try {
-      await bookingService.deleteBooking(booking.id);
+      await invoiceService.deleteInvoice(invoice.id);
     } catch (rollbackError) {
-      console.error('Failed to rollback booking after invoice creation failed:', rollbackError);
+      console.error('Failed to rollback invoice after booking creation failed:', rollbackError);
     }
     throw error;
   }
