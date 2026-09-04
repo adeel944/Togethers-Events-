@@ -91,7 +91,6 @@ export const bookingService = {
     const businessId = await getBusinessId();
     const totalAmount = Number(payload.totalAmount || 0);
     const advancePaid = Number(payload.advancePaid || 0);
-    const remainingAmount = Math.max(0, totalAmount - advancePaid);
     const paymentStatus: Booking['paymentStatus'] = advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending';
     const { assignedVendors = [], ...bookingPayload } = payload;
 
@@ -106,7 +105,6 @@ export const bookingService = {
       package: bookingPayload.package || '',
       total_amount: totalAmount,
       advance_paid: advancePaid,
-      remaining_amount: remainingAmount,
       booking_status: bookingPayload.bookingStatus,
       payment_status: paymentStatus,
       notes: bookingPayload.notes || '',
@@ -150,7 +148,6 @@ export const bookingService = {
 
     const totalAmount = updates.totalAmount !== undefined ? Number(updates.totalAmount || 0) : current.totalAmount;
     const advancePaid = updates.advancePaid !== undefined ? Number(updates.advancePaid || 0) : current.advancePaid;
-    const remainingAmount = Math.max(0, totalAmount - advancePaid);
     const paymentStatus: Booking['paymentStatus'] = advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending';
     const { assignedVendors, id: _id, createdAt: _createdAt, remainingAmount: _remaining, clientName: _clientName, ...updatesWithoutLocalFields } = updates;
 
@@ -166,7 +163,6 @@ export const bookingService = {
     if (updatesWithoutLocalFields.notes !== undefined) dbUpdates.notes = updatesWithoutLocalFields.notes || '';
     dbUpdates.total_amount = totalAmount;
     dbUpdates.advance_paid = advancePaid;
-    dbUpdates.remaining_amount = remainingAmount;
     dbUpdates.payment_status = paymentStatus;
 
     const { data, error } = await supabase.from('bookings').update(dbUpdates).eq('id', id).eq('business_id', businessId).select('*').single();
