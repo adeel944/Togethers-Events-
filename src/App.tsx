@@ -17,6 +17,7 @@ import { VendorsView } from './components/vendors/VendorsView';
 import { InvoicesView } from './components/invoices/InvoicesView';
 import { InvoicePreviewView } from './components/invoices/InvoicePreviewView';
 import { SettingsView } from './components/settings/SettingsView';
+import { FinanceView } from './components/finance/FinanceView';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 export default function App() {
@@ -123,6 +124,7 @@ export default function App() {
           {currentTab === 'clients' && <ClientsView clients={clients} bookings={bookings} invoices={invoices} profile={profile} onCreateClient={handleCreateClient} onUpdateClient={handleUpdateClient} onDeleteClient={handleDeleteClient} onSelectBooking={handleSelectBooking} onSelectInvoice={inv => setPreviewInvoice(inv)} onNewBookingForClient={() => handleTabChange('invoices')} onNewInvoiceForClient={() => handleTabChange('invoices')} />}
           {currentTab === 'vendors' && <VendorsView vendors={vendors} bookings={bookings} profile={profile} onCreateVendor={handleCreateVendor} onUpdateVendor={handleUpdateVendor} onDeleteVendor={handleDeleteVendor} onSelectBooking={handleSelectBooking} />}
           {currentTab === 'invoices' && <InvoicesView invoices={invoices} clients={clients} bookings={bookings} profile={profile} settings={settings} onCreateInvoice={handleCreateInvoice} onUpdateInvoice={handleUpdateInvoice} onDeleteInvoice={handleDeleteInvoice} onDuplicateInvoice={handleDuplicateInvoice} onPreviewInvoice={inv => setPreviewInvoice(inv)} onCreateClient={handleCreateClient} />}
+          {currentTab === 'finance' && <FinanceView profile={profile} bookings={bookings} invoices={invoices} />}
           {(currentTab === 'settings-profile' || currentTab === 'settings-invoice' || (currentTab as string) === 'settings') && <SettingsView profile={profile} settings={settings} initialTab={currentTab === 'settings-invoice' ? 'invoice' : 'profile'} onSaveProfile={handleSaveProfile} onSaveSettings={handleSaveSettings} />}
         </>}
       </ErrorBoundary></div></main>
