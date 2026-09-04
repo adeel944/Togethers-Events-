@@ -38,38 +38,51 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
-  // Core Data Layer State
+  // Core Data Layer State. Keep these empty until the real database finishes loading;
+  // mock data must never appear as dashboard/business data.
   const [profile, setProfile] = useState<BusinessProfile>(initialBusinessProfile);
   const [settings, setSettings] = useState<InvoiceSettings>(initialInvoiceSettings);
-  const [bookings, setBookings] = useState<Booking[]>(initialBookings);
-  const [clients, setClients] = useState<Client[]>(initialClients);
-  const [vendors, setVendors] = useState<Vendor[]>(initialVendors);
-  const [invoices, setInvoices] = useState<Invoice[]>(initialInvoices);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
 
   // Deep Navigation / Modals State
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
   const [selectedBookingForDetail, setSelectedBookingForDetail] = useState<Booking | null>(null);
 
-  // Sync state on mount and reload
+  // Load each resource independently so one failing query (for example an optional
+  // booking-vendor relation) cannot prevent invoices/clients/other dashboard data
+  // from loading. Failed resources remain empty instead of silently showing mock data.
   const refreshAll = async () => {
-    try {
-      const [p, s, b, c, v, i] = await Promise.all([
-        businessService.getProfile(),
-        businessService.getInvoiceSettings(),
-        bookingService.getBookings(),
-        clientService.getClients(),
-        vendorService.getVendors(),
-        invoiceService.getInvoices(),
-      ]);
-      setProfile(p || initialBusinessProfile);
-      setSettings(s || initialInvoiceSettings);
-      setBookings(Array.isArray(b) ? b : initialBookings);
-      setClients(Array.isArray(c) ? c : initialClients);
-      setVendors(Array.isArray(v) ? v : initialVendors);
-      setInvoices(Array.isArray(i) ? i : initialInvoices);
-    } catch (err) {
-      console.error('Error loading data:', err);
-    }
+    const results = await Promise.allSettled([
+      businessService.getProfile(),
+      businessService.getInvoiceSettings(),
+      bookingService.getBookings(),
+      clientService.getClients(),
+      vendorService.getVendors(),
+      invoiceService.getInvoices(),
+    ]);
+
+    const [p, s, b, c, v, i] = results;
+
+    if (p.status === 'fulfilled') setProfile(p.value || initialBusinessProfile);
+    else console.error('Error loading business profile:', p.reason);
+
+    if (s.status === 'fulfilled') setSettings(s.value || initialInvoiceSettings);
+    else console.error('Error loading invoice settings:', s.reason);
+
+    if (b.status === 'fulfilled') setBookings(Array.isArray(b.value) ? b.value : []);
+    else console.error('Error loading bookings:', b.reason);
+
+    if (c.status === 'fulfilled') setClients(Array.isArray(c.value) ? c.value : []);
+    else console.error('Error loading clients:', c.reason);
+
+    if (v.status === 'fulfilled') setVendors(Array.isArray(v.value) ? v.value : []);
+    else console.error('Error loading vendors:', v.reason);
+
+    if (i.status === 'fulfilled') setInvoices(Array.isArray(i.value) ? i.value : []);
+    else console.error('Error loading invoices:', i.reason);
   };
 
   useEffect(() => {
@@ -212,7 +225,6 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-[#d4e1ec] via-[#e3ecf3] to-[#c8d8e5] flex text-slate-800 antialiased font-sans">
-      {/* Sidebar - Dedicated Column in Desktop Flex, Drawer in Mobile */}
       <Sidebar
         currentTab={currentTab}
         onTabChange={handleTabChange}
@@ -223,9 +235,7 @@ export default function App() {
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
 
-      {/* Main Content Column (Header + Scrollable Views) */}
       <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
-        {/* Top Header Navigation - Sits cleanly within main content width */}
         <Header
           profile={profile}
           onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
@@ -240,12 +250,10 @@ export default function App() {
           }}
         />
 
-        {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 w-full">
           <div className="max-w-[1560px] mx-auto w-full">
             <ErrorBoundary>
               {previewInvoice ? (
-                /* Dedicated A4 Invoice Preview Screen */
                 <InvoicePreviewView
                   invoice={previewInvoice}
                   profile={profile}
