@@ -14,6 +14,7 @@ import { bookingService } from './services/bookingService';
 import { clientService } from './services/clientService';
 import { vendorService } from './services/vendorService';
 import { invoiceService } from './services/invoiceService';
+import { createInvoiceWithBooking } from './services/invoiceBookingService';
 
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
@@ -145,7 +146,8 @@ export default function App() {
   };
 
   const handleCreateInvoice = async (invoiceData: Omit<Invoice, 'id' | 'createdAt'>) => {
-    const created = await invoiceService.createInvoice(invoiceData);
+    const { invoice: created, booking } = await createInvoiceWithBooking(invoiceData);
+    await refreshBookingsWithoutLosingCreated(booking);
     setInvoices(await invoiceService.getInvoices());
     return created;
   };
