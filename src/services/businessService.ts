@@ -1,30 +1,108 @@
 import { BusinessProfile, InvoiceSettings } from '../types';
 import { initialBusinessProfile, initialInvoiceSettings } from './mockData';
+import { supabase } from '../lib/supabase';
 
-const BUSINESS_KEY = 'together_events_business_profile';
-const INVOICE_SETTINGS_KEY = 'together_events_invoice_settings';
+async function getBusinessId(): Promise<string> {
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) throw new Error('Not authenticated. Please sign in again.');
+
+  const { data, error } = await supabase
+    .from('business_members')
+    .select('business_id')
+    .eq('user_id', userData.user.id)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data?.business_id) throw new Error('No business membership found for this account.');
+  return data.business_id;
+}
+
+function mapProfile(row: any): BusinessProfile {
+  return {
+    businessName: row.business_name || '',
+    tagline: row.tagline || '',
+    ownerName: row.owner_name || '',
+    phone: row.phone || '',
+    whatsApp: row.whatsapp || '',
+    email: row.email || '',
+    website: row.website || '',
+    address: row.address || '',
+    city: row.city || '',
+    country: row.country || '',
+    taxNumber: row.tax_number || undefined,
+    registrationNumber: row.registration_number || undefined,
+    logoUrl: row.logo_url || undefined,
+    signatureUrl: row.signature_url || undefined,
+    invoiceFooterText: row.invoice_footer_text || '',
+    defaultTerms: row.default_terms || '',
+    defaultCurrency: row.default_currency || row.currency || 'AED',
+    currency: row.currency || undefined,
+    currencySymbol: row.currency_symbol || 'AED',
+    invoicePrefix: row.invoice_prefix || 'TE-',
+    invoiceStartingNumber: Number(row.invoice_starting_number || 1001),
+    bankDetails: row.bank_details || undefined,
+  };
+}
+
+function mapInvoiceSettings(row: any): InvoiceSettings {
+  return {
+    documentTitle: row.document_title || 'BOOKING CONFIRMATION',
+    defaultTemplate: row.default_template || 'modern',
+    showLogo: row.show_logo ?? true,
+    showSignature: row.show_signature ?? true,
+    showBusinessAddress: row.show_business_address ?? true,
+    showBillingAddress: row.show_billing_address ?? true,
+    showContactInfo: row.show_contact_info ?? true,
+    showPhone: row.show_phone ?? true,
+    showEmail: row.show_email ?? true,
+    fontSize: row.font_size || 'medium',
+    bodySize: row.body_size || 'medium',
+    headingSize: row.heading_size || 'large',
+    dateFormat: row.date_format || 'DD/MM/YYYY',
+  };
+}
 
 export const businessService = {
   async getProfile(): Promise<BusinessProfile> {
-    try {
-      const data = localStorage.getItem(BUSINESS_KEY);
-      if (data) {
-        const parsed = JSON.parse(data);
-        if (parsed && typeof parsed === 'object') {
-          return { ...initialBusinessProfile, ...parsed };
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return { ...initialBusinessProfile };
+    const businessId = await getBusinessId();
+    const { data, error } = await supabase
+      .from('businesses')
+      .select('*')
+      .eq('id', businessId)
+      .single();
+    if (error) throw new Error(error.message);
+    return data ? mapProfile(data) : { ...initialBusinessProfile };
   },
 
   async updateProfile(updates: Partial<BusinessProfile>): Promise<BusinessProfile> {
-    const current = await this.getProfile();
-    const updated = { ...current, ...updates };
-    localStorage.setItem(BUSINESS_KEY, JSON.stringify(updated));
-    // Trigger storage event so other components can react if needed
+    const businessId = await getBusinessId();
+    const dbUpdates: Record<string, any> = {};
+
+    const fields: Record<string, string> = {
+      businessName: 'business_name', tagline: 'tagline', ownerName: 'owner_name',
+      phone: 'phone', whatsApp: 'whatsapp', email: 'email', website: 'website',
+      address: 'address', city: 'city', country: 'country', taxNumber: 'tax_number',
+      registrationNumber: 'registration_number', logoUrl: 'logo_url', signatureUrl: 'signature_url',
+      invoiceFooterText: 'invoice_footer_text', defaultTerms: 'default_terms',
+      defaultCurrency: 'default_currency', currency: 'currency', currencySymbol: 'currency_symbol',
+      invoicePrefix: 'invoice_prefix', invoiceStartingNumber: 'invoice_starting_number',
+      bankDetails: 'bank_details',
+    };
+
+    for (const [key, column] of Object.entries(fields)) {
+      if ((updates as any)[key] !== undefined) dbUpdates[column] = (updates as any)[key];
+    }
+
+    const { data, error } = await supabase
+      .from('businesses')
+      .update(dbUpdates)
+      .eq('id', businessId)
+      .select('*')
+      .single();
+    if (error) throw new Error(error.message);
+
+    const updated = mapProfile(data);
     window.dispatchEvent(new CustomEvent('business_profile_updated', { detail: updated }));
     return updated;
   },
@@ -34,24 +112,54 @@ export const businessService = {
   },
 
   async getInvoiceSettings(): Promise<InvoiceSettings> {
-    try {
-      const data = localStorage.getItem(INVOICE_SETTINGS_KEY);
-      if (data) {
-        const parsed = JSON.parse(data);
-        if (parsed && typeof parsed === 'object') {
-          return { ...initialInvoiceSettings, ...parsed };
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return { ...initialInvoiceSettings };
+    const businessId = await getBusinessId();
+    const { data, error } = await supabase
+      .from('invoice_settings')
+      .select('*')
+      .eq('business_id', businessId)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? mapInvoiceSettings(data) : { ...initialInvoiceSettings };
   },
 
   async updateInvoiceSettings(updates: Partial<InvoiceSettings>): Promise<InvoiceSettings> {
-    const current = await this.getInvoiceSettings();
-    const updated = { ...current, ...updates };
-    localStorage.setItem(INVOICE_SETTINGS_KEY, JSON.stringify(updated));
+    const businessId = await getBusinessId();
+    const dbUpdates: Record<string, any> = {};
+    const fields: Record<string, string> = {
+      documentTitle: 'document_title', defaultTemplate: 'default_template', showLogo: 'show_logo',
+      showSignature: 'show_signature', showBusinessAddress: 'show_business_address',
+      showBillingAddress: 'show_billing_address', showContactInfo: 'show_contact_info',
+      showPhone: 'show_phone', showEmail: 'show_email', fontSize: 'font_size',
+      bodySize: 'body_size', headingSize: 'heading_size', dateFormat: 'date_format',
+    };
+
+    for (const [key, column] of Object.entries(fields)) {
+      if ((updates as any)[key] !== undefined) dbUpdates[column] = (updates as any)[key];
+    }
+
+    const { data: existing, error: existingError } = await supabase
+      .from('invoice_settings')
+      .select('id')
+      .eq('business_id', businessId)
+      .limit(1)
+      .maybeSingle();
+    if (existingError) throw new Error(existingError.message);
+
+    let data: any;
+    let error: any;
+    if (existing?.id) {
+      const result = await supabase.from('invoice_settings').update(dbUpdates).eq('id', existing.id).select('*').single();
+      data = result.data;
+      error = result.error;
+    } else {
+      const result = await supabase.from('invoice_settings').insert({ business_id: businessId, ...dbUpdates }).select('*').single();
+      data = result.data;
+      error = result.error;
+    }
+    if (error) throw new Error(error.message);
+
+    const updated = mapInvoiceSettings(data);
     window.dispatchEvent(new CustomEvent('invoice_settings_updated', { detail: updated }));
     return updated;
   },
