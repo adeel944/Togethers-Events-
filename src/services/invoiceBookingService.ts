@@ -2,21 +2,10 @@ import { Invoice, Booking } from '../types';
 import { bookingService } from './bookingService';
 import { invoiceService } from './invoiceService';
 
-/**
- * Creates the booking first, then creates the invoice linked to that booking.
- * This is used by the standalone New Invoice flow so every new event entered
- * there also appears in Bookings, Calendar and Dashboard.
- */
+/** Single creation flow: New Invoice creates the invoice and its linked booking. */
 export async function createInvoiceWithBooking(
   invoiceData: Omit<Invoice, 'id' | 'createdAt'>
 ): Promise<{ invoice: Invoice; booking: Booking }> {
-  if (invoiceData.bookingId) {
-    const invoice = await invoiceService.createInvoice(invoiceData);
-    const booking = await bookingService.getBookingById(invoiceData.bookingId);
-    if (!booking) throw new Error('Invoice was created, but its linked booking could not be found.');
-    return { invoice, booking };
-  }
-
   const firstItem = invoiceData.items?.[0];
   const packageName = firstItem?.description?.trim() || 'Custom Package';
   const totalAmount = Math.max(0, Number(invoiceData.totalAmount || 0));
@@ -29,7 +18,7 @@ export async function createInvoiceWithBooking(
     eventDate: invoiceData.eventDate,
     eventTime: invoiceData.eventTime || '',
     venue: invoiceData.venue || '',
-    guestCount: 0,
+    guestCount: Math.max(0, Number(invoiceData.guestCount || 0)),
     package: packageName,
     totalAmount,
     advancePaid,
@@ -43,6 +32,8 @@ export async function createInvoiceWithBooking(
     const invoice = await invoiceService.createInvoice({
       ...invoiceData,
       bookingId: booking.id,
+      totalAmount,
+      remainingBalance: Math.max(0, totalAmount - advancePaid),
     });
     return { invoice, booking };
   } catch (error) {
