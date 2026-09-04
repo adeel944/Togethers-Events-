@@ -52,11 +52,22 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setCurrentDate(new Date());
   };
 
+  // Supabase may return a DATE as YYYY-MM-DD, while some environments/legacy
+  // rows can expose a timestamp such as YYYY-MM-DDTHH:mm:ss. Normalize both
+  // forms before comparing them with the calendar cell date.
+  const normalizeEventDate = (value: unknown): string => {
+    if (!value) return '';
+    const raw = String(value).trim();
+    const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+    return raw;
+  };
+
   const getBookingsForDate = (day: number) => {
     const formattedMonth = String(month + 1).padStart(2, '0');
     const formattedDay = String(day).padStart(2, '0');
     const dateStr = `${year}-${formattedMonth}-${formattedDay}`;
-    return bookings.filter((b) => b.eventDate === dateStr);
+    return bookings.filter((b) => normalizeEventDate(b.eventDate) === dateStr);
   };
 
   const today = new Date();
@@ -126,12 +137,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
         {/* Days Matrix */}
         <div className="grid grid-cols-7 divide-x divide-y divide-slate-100 bg-transparent min-h-[560px]">
-          {/* Empty cells before start of month */}
           {Array.from({ length: firstDayIndex }).map((_, idx) => (
             <div key={`empty-start-${idx}`} className="bg-slate-50/30 p-2 min-h-[90px] sm:min-h-[110px]" />
           ))}
 
-          {/* Days of month */}
           {Array.from({ length: totalDays }).map((_, idx) => {
             const dayNum = idx + 1;
             const dayBookings = getBookingsForDate(dayNum);
@@ -147,9 +156,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 <div className="flex items-center justify-between">
                   <span
                     className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${
-                      isToday
-                        ? 'bg-slate-900 text-white'
-                        : 'text-slate-700'
+                      isToday ? 'bg-slate-900 text-white' : 'text-slate-700'
                     }`}
                   >
                     {dayNum}
@@ -161,7 +168,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   )}
                 </div>
 
-                {/* Event Pills */}
                 <div className="space-y-1.5 mt-1.5 flex-1">
                   {dayBookings.map((b) => (
                     <div
