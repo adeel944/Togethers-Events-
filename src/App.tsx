@@ -20,114 +20,29 @@ import { SettingsView } from './components/settings/SettingsView';
 import { FinanceView } from './components/finance/FinanceView';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
-export default function App() {
-  const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [profile, setProfile] = useState<BusinessProfile>(initialBusinessProfile);
-  const [settings, setSettings] = useState<InvoiceSettings>(initialInvoiceSettings);
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
-  const [selectedBookingForDetail, setSelectedBookingForDetail] = useState<Booking | null>(null);
-
-  const refreshAll = async () => {
-    const results = await Promise.allSettled([
-      businessService.getProfile(), businessService.getInvoiceSettings(), bookingService.getBookings(),
-      clientService.getClients(), vendorService.getVendors(), invoiceService.getInvoices(),
-    ]);
-    const [p, s, b, c, v, i] = results;
-    if (p.status === 'fulfilled') setProfile(p.value || initialBusinessProfile);
-    if (s.status === 'fulfilled') setSettings(s.value || initialInvoiceSettings);
-    if (b.status === 'fulfilled' && Array.isArray(b.value)) setBookings(b.value);
-    if (c.status === 'fulfilled') setClients(Array.isArray(c.value) ? c.value : []);
-    if (v.status === 'fulfilled') setVendors(Array.isArray(v.value) ? v.value : []);
-    if (i.status === 'fulfilled') setInvoices(Array.isArray(i.value) ? i.value : []);
-  };
-  useEffect(() => { void refreshAll(); }, []);
-
-  const refreshBookings = async (created?: Booking) => {
-    try {
-      const fresh = await bookingService.getBookings();
-      if (fresh.length > 0) { setBookings(fresh); return fresh; }
-    } catch (error) { console.error('Error refreshing bookings:', error); }
-    if (created) setBookings(current => current.some(b => b.id === created.id) ? current.map(b => b.id === created.id ? created : b) : [created, ...current]);
-    return null;
-  };
-  const handleUpdateBooking = async (id: string, updates: Partial<Booking>) => { const updated = await bookingService.updateBooking(id, updates); await refreshBookings(updated); return updated; };
-  const handleDeleteBooking = async (id: string) => { const result = await bookingService.deleteBooking(id); setBookings(current => current.filter(b => b.id !== id)); return result; };
-  const handleAssignVendor = async (bookingId: string, vendorData: any) => { const updated = await bookingService.assignVendor(bookingId, vendorData); await refreshBookings(updated); return updated; };
-  const handleRemoveVendor = async (bookingId: string, bookingVendorId: string) => { const updated = await bookingService.removeAssignedVendor(bookingId, bookingVendorId); await refreshBookings(updated); return updated; };
-
-  const handleCreateClient = async (data: Omit<Client, 'id' | 'createdAt'>) => { const created = await clientService.createClient(data); setClients(await clientService.getClients()); return created; };
-  const handleUpdateClient = async (id: string, updates: Partial<Client>) => { const updated = await clientService.updateClient(id, updates); setClients(await clientService.getClients()); return updated; };
-  const handleDeleteClient = async (id: string) => { const result = await clientService.deleteClient(id); setClients(await clientService.getClients()); return result; };
-  const handleCreateVendor = async (data: Omit<Vendor, 'id' | 'createdAt'>) => { const created = await vendorService.createVendor(data); setVendors(await vendorService.getVendors()); return created; };
-  const handleUpdateVendor = async (id: string, updates: Partial<Vendor>) => { const updated = await vendorService.updateVendor(id, updates); setVendors(await vendorService.getVendors()); return updated; };
-  const handleDeleteVendor = async (id: string) => { const result = await vendorService.deleteVendor(id); setVendors(await vendorService.getVendors()); return result; };
-
-  const handleCreateInvoice = async (invoiceData: Omit<Invoice, 'id' | 'createdAt'>) => {
-    const { invoice: created, booking } = await createInvoiceWithBooking(invoiceData);
-    await refreshBookings(booking);
-    setInvoices(await invoiceService.getInvoices());
-    return created;
-  };
-
-  const handleUpdateInvoice = async (id: string, updates: Partial<Invoice>) => {
-    const current = invoices.find(inv => inv.id === id) || await invoiceService.getInvoiceById(id);
-    const updated = await invoiceService.updateInvoice(id, updates);
-    if (current?.bookingId) {
-      const bookingUpdates: Partial<Booking> = {};
-      if (updates.clientId !== undefined) bookingUpdates.clientId = updates.clientId;
-      if (updates.clientName !== undefined) bookingUpdates.clientName = updates.clientName;
-      if (updates.eventType !== undefined) bookingUpdates.eventType = updates.eventType;
-      if (updates.eventDate !== undefined) bookingUpdates.eventDate = updates.eventDate;
-      if (updates.eventTime !== undefined) bookingUpdates.eventTime = updates.eventTime || '';
-      if (updates.venue !== undefined) bookingUpdates.venue = updates.venue || '';
-      if (updates.totalAmount !== undefined) bookingUpdates.totalAmount = Number(updates.totalAmount || 0);
-      if (updates.advancePaid !== undefined) bookingUpdates.advancePaid = Number(updates.advancePaid || 0);
-      if (updates.notes !== undefined) bookingUpdates.notes = updates.notes || '';
-      if (Object.keys(bookingUpdates).length) await handleUpdateBooking(current.bookingId, bookingUpdates);
-    }
-    setInvoices(await invoiceService.getInvoices());
-    return updated;
-  };
-
-  const handleDeleteInvoice = async (id: string) => {
-    const current = invoices.find(inv => inv.id === id) || await invoiceService.getInvoiceById(id);
-    const result = await invoiceService.deleteInvoice(id);
-    if (current?.bookingId) {
-      try { await bookingService.deleteBooking(current.bookingId); } catch (error) { console.error('Failed to delete linked booking:', error); }
-      setBookings(currentBookings => currentBookings.filter(b => b.id !== current.bookingId));
-    }
-    setInvoices(await invoiceService.getInvoices());
-    if (previewInvoice?.id === id) setPreviewInvoice(null);
-    return result;
-  };
-  const handleDuplicateInvoice = async (id: string) => { const duplicate = await invoiceService.duplicateInvoice(id); setInvoices(await invoiceService.getInvoices()); return duplicate; };
-  const handleSaveProfile = async (data: BusinessProfile) => { const saved = await businessService.saveProfile(data); setProfile(saved); return saved; };
-  const handleSaveSettings = async (data: InvoiceSettings) => { const saved = await businessService.saveInvoiceSettings(data); setSettings(saved); return saved; };
-  const handleSaveLogo = async (logoUrl: string) => { await handleSaveProfile({ ...profile, logoUrl }); };
-  const handleTabChange = (tab: NavTab) => { setCurrentTab(tab); setPreviewInvoice(null); };
-  const handleSelectBooking = (booking: Booking) => { setSelectedBookingForDetail(booking); setCurrentTab('bookings'); setPreviewInvoice(null); };
-
-  return <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-[#d4e1ec] via-[#e3ecf3] to-[#c8d8e5] flex text-slate-800 antialiased font-sans">
-    <Sidebar currentTab={currentTab} onTabChange={handleTabChange} onSelectTab={handleTabChange} profile={profile} isMobileOpen={isMobileSidebarOpen} isOpenMobile={isMobileSidebarOpen} onCloseMobile={() => setIsMobileSidebarOpen(false)} />
-    <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
-      <Header profile={profile} onOpenMobileMenu={() => setIsMobileSidebarOpen(true)} onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)} onNewInvoice={() => handleTabChange('invoices')} onSaveLogo={handleSaveLogo} />
-      <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 w-full"><div className="max-w-[1560px] mx-auto w-full"><ErrorBoundary>
-        {previewInvoice ? <InvoicePreviewView invoice={previewInvoice} profile={profile} settings={settings} onBack={() => setPreviewInvoice(null)} onUpdateSettings={async updated => { await handleSaveSettings({ ...settings, ...updated }); }} /> : <>
-          {currentTab === 'dashboard' && <DashboardView profile={profile} bookings={bookings} clients={clients} invoices={invoices} onNavigate={handleTabChange} onSelectBooking={handleSelectBooking} />}
-          {currentTab === 'bookings' && <BookingsView bookings={bookings} clients={clients} vendors={vendors} profile={profile} onUpdateBooking={handleUpdateBooking} onDeleteBooking={handleDeleteBooking} onAssignVendor={handleAssignVendor} onRemoveVendor={handleRemoveVendor} selectedBookingForDetail={selectedBookingForDetail} onCloseDetail={() => setSelectedBookingForDetail(null)} />}
-          {currentTab === 'calendar' && <CalendarView bookings={bookings} profile={profile} onSelectBooking={handleSelectBooking} onNewBooking={() => handleTabChange('invoices')} />}
-          {currentTab === 'clients' && <ClientsView clients={clients} bookings={bookings} invoices={invoices} profile={profile} onCreateClient={handleCreateClient} onUpdateClient={handleUpdateClient} onDeleteClient={handleDeleteClient} onSelectBooking={handleSelectBooking} onSelectInvoice={inv => setPreviewInvoice(inv)} onNewBookingForClient={() => handleTabChange('invoices')} onNewInvoiceForClient={() => handleTabChange('invoices')} />}
-          {currentTab === 'vendors' && <VendorsView vendors={vendors} bookings={bookings} profile={profile} onCreateVendor={handleCreateVendor} onUpdateVendor={handleUpdateVendor} onDeleteVendor={handleDeleteVendor} onSelectBooking={handleSelectBooking} />}
-          {currentTab === 'invoices' && <InvoicesView invoices={invoices} clients={clients} bookings={bookings} profile={profile} settings={settings} onCreateInvoice={handleCreateInvoice} onUpdateInvoice={handleUpdateInvoice} onDeleteInvoice={handleDeleteInvoice} onDuplicateInvoice={handleDuplicateInvoice} onPreviewInvoice={inv => setPreviewInvoice(inv)} onCreateClient={handleCreateClient} />}
-          {currentTab === 'finance' && <FinanceView profile={profile} bookings={bookings} invoices={invoices} />}
-          {(currentTab === 'settings-profile' || currentTab === 'settings-invoice' || (currentTab as string) === 'settings') && <SettingsView profile={profile} settings={settings} initialTab={currentTab === 'settings-invoice' ? 'invoice' : 'profile'} onSaveProfile={handleSaveProfile} onSaveSettings={handleSaveSettings} />}
-        </>}
-      </ErrorBoundary></div></main>
-    </div>
-  </div>;
+export default function App(){
+ const [currentTab,setCurrentTab]=useState<NavTab>('dashboard'); const [isMobileSidebarOpen,setIsMobileSidebarOpen]=useState(false);
+ const [profile,setProfile]=useState<BusinessProfile>(initialBusinessProfile); const [settings,setSettings]=useState<InvoiceSettings>(initialInvoiceSettings);
+ const [bookings,setBookings]=useState<Booking[]>([]); const [clients,setClients]=useState<Client[]>([]); const [vendors,setVendors]=useState<Vendor[]>([]); const [invoices,setInvoices]=useState<Invoice[]>([]);
+ const [previewInvoice,setPreviewInvoice]=useState<Invoice|null>(null); const [selectedBookingForDetail,setSelectedBookingForDetail]=useState<Booking|null>(null);
+ const refreshAll=async()=>{const results=await Promise.allSettled([businessService.getProfile(),businessService.getInvoiceSettings(),bookingService.getBookings(),clientService.getClients(),vendorService.getVendors(),invoiceService.getInvoices()]);const [p,s,b,c,v,i]=results;if(p.status==='fulfilled')setProfile(p.value||initialBusinessProfile);if(s.status==='fulfilled')setSettings(s.value||initialInvoiceSettings);if(b.status==='fulfilled'&&Array.isArray(b.value))setBookings(b.value);if(c.status==='fulfilled')setClients(Array.isArray(c.value)?c.value:[]);if(v.status==='fulfilled')setVendors(Array.isArray(v.value)?v.value:[]);if(i.status==='fulfilled')setInvoices(Array.isArray(i.value)?i.value:[])};
+ useEffect(()=>{void refreshAll()},[]);
+ const refreshBookings=async(created?:Booking)=>{try{const fresh=await bookingService.getBookings();if(fresh.length>0){setBookings(fresh);return fresh}}catch(error){console.error('Error refreshing bookings:',error)}if(created)setBookings(current=>current.some(b=>b.id===created.id)?current.map(b=>b.id===created.id?created:b):[created,...current]);return null};
+ const handleUpdateBooking=async(id:string,updates:Partial<Booking>)=>{const updated=await bookingService.updateBooking(id,updates);await refreshBookings(updated);return updated};
+ const handleDeleteBooking=async(id:string)=>{const result=await bookingService.deleteBooking(id);setBookings(current=>current.filter(b=>b.id!==id));return result};
+ const handleAssignVendor=async(bookingId:string,vendorData:any)=>{const updated=await bookingService.assignVendor(bookingId,vendorData);await refreshBookings(updated);return updated};
+ const handleRemoveVendor=async(bookingId:string,bookingVendorId:string)=>{const updated=await bookingService.removeAssignedVendor(bookingId,bookingVendorId);await refreshBookings(updated);return updated};
+ const handleCreateClient=async(data:Omit<Client,'id'|'createdAt'>)=>{const created=await clientService.createClient(data);setClients(await clientService.getClients());return created};
+ const handleUpdateClient=async(id:string,updates:Partial<Client>)=>{const updated=await clientService.updateClient(id,updates);setClients(await clientService.getClients());return updated};
+ const handleDeleteClient=async(id:string)=>{const result=await clientService.deleteClient(id);setClients(await clientService.getClients());return result};
+ const handleCreateVendor=async(data:Omit<Vendor,'id'|'createdAt'>)=>{const created=await vendorService.createVendor(data);setVendors(await vendorService.getVendors());return created};
+ const handleUpdateVendor=async(id:string,updates:Partial<Vendor>)=>{const updated=await vendorService.updateVendor(id,updates);setVendors(await vendorService.getVendors());return updated};
+ const handleDeleteVendor=async(id:string)=>{const result=await vendorService.deleteVendor(id);setVendors(await vendorService.getVendors());return result};
+ const handleCreateInvoice=async(invoiceData:Omit<Invoice,'id'|'createdAt'>)=>{const {invoice:created,booking}=await createInvoiceWithBooking(invoiceData);await refreshBookings(booking);setInvoices(await invoiceService.getInvoices());return created};
+ const handleUpdateInvoice=async(id:string,updates:Partial<Invoice>)=>{const current=invoices.find(inv=>inv.id===id)||await invoiceService.getInvoiceById(id);const updated=await invoiceService.updateInvoice(id,updates);if(current?.bookingId){const bookingUpdates:Partial<Booking>={};if(updates.clientId!==undefined)bookingUpdates.clientId=updates.clientId;if(updates.clientName!==undefined)bookingUpdates.clientName=updates.clientName;if(updates.eventType!==undefined)bookingUpdates.eventType=updates.eventType;if(updates.eventDate!==undefined)bookingUpdates.eventDate=updates.eventDate;if(updates.eventTime!==undefined)bookingUpdates.eventTime=updates.eventTime||'';if(updates.venue!==undefined)bookingUpdates.venue=updates.venue||'';if(updates.totalAmount!==undefined)bookingUpdates.totalAmount=Number(updates.totalAmount||0);if(updates.advancePaid!==undefined)bookingUpdates.advancePaid=Number(updates.advancePaid||0);if(updates.notes!==undefined)bookingUpdates.notes=updates.notes||'';if(Object.keys(bookingUpdates).length)await handleUpdateBooking(current.bookingId,bookingUpdates)}setInvoices(await invoiceService.getInvoices());return updated};
+ const handleDeleteInvoice=async(id:string)=>{const current=invoices.find(inv=>inv.id===id)||await invoiceService.getInvoiceById(id);const result=await invoiceService.deleteInvoice(id);if(current?.bookingId){try{await bookingService.deleteBooking(current.bookingId)}catch(error){console.error('Failed to delete linked booking:',error)}setBookings(currentBookings=>currentBookings.filter(b=>b.id!==current.bookingId))}setInvoices(await invoiceService.getInvoices());if(previewInvoice?.id===id)setPreviewInvoice(null);return result};
+ const handleDuplicateInvoice=async(id:string)=>{const duplicate=await invoiceService.duplicateInvoice(id);setInvoices(await invoiceService.getInvoices());return duplicate};
+ const handleSaveProfile=async(data:BusinessProfile)=>{const saved=await businessService.saveProfile(data);setProfile(saved);return saved}; const handleSaveSettings=async(data:InvoiceSettings)=>{const saved=await businessService.saveInvoiceSettings(data);setSettings(saved);return saved};
+ const handleSaveLogo=async(logoUrl:string)=>{await handleSaveProfile({...profile,logoUrl})}; const handleTabChange=(tab:NavTab)=>{setCurrentTab(tab);setPreviewInvoice(null)}; const handleSelectBooking=(booking:Booking)=>{setSelectedBookingForDetail(booking);setCurrentTab('bookings');setPreviewInvoice(null)};
+ return <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-[#d4e1ec] via-[#e3ecf3] to-[#c8d8e5] flex text-slate-800 antialiased font-sans"><Sidebar currentTab={currentTab} onTabChange={handleTabChange} onSelectTab={handleTabChange} profile={profile} isMobileOpen={isMobileSidebarOpen} isOpenMobile={isMobileSidebarOpen} onCloseMobile={()=>setIsMobileSidebarOpen(false)}/><div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden"><Header profile={profile} onOpenMobileMenu={()=>setIsMobileSidebarOpen(true)} onOpenMobileSidebar={()=>setIsMobileSidebarOpen(true)} onNewInvoice={()=>handleTabChange('invoices')} onSaveLogo={handleSaveLogo}/><main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 w-full"><div className="max-w-[1560px] mx-auto w-full"><ErrorBoundary>{previewInvoice?<InvoicePreviewView invoice={previewInvoice} profile={profile} settings={settings} onBack={()=>setPreviewInvoice(null)} onUpdateSettings={async updated=>{await handleSaveSettings({...settings,...updated})}}/>:<>{currentTab==='dashboard'&&<DashboardView profile={profile} bookings={bookings} clients={clients} invoices={invoices} onNavigate={handleTabChange} onSelectBooking={handleSelectBooking}/>} {currentTab==='bookings'&&<BookingsView bookings={bookings} clients={clients} vendors={vendors} profile={profile} onUpdateBooking={handleUpdateBooking} onDeleteBooking={handleDeleteBooking} onAssignVendor={handleAssignVendor} onRemoveVendor={handleRemoveVendor} selectedBookingForDetail={selectedBookingForDetail} onCloseDetail={()=>setSelectedBookingForDetail(null)}/>} {currentTab==='calendar'&&<CalendarView bookings={bookings} profile={profile} onSelectBooking={handleSelectBooking} onNewBooking={()=>handleTabChange('invoices')}/>} {currentTab==='clients'&&<ClientsView clients={clients} bookings={bookings} invoices={invoices} profile={profile} onCreateClient={handleCreateClient} onUpdateClient={handleUpdateClient} onDeleteClient={handleDeleteClient} onSelectBooking={handleSelectBooking} onSelectInvoice={inv=>setPreviewInvoice(inv)} onNewBookingForClient={()=>handleTabChange('invoices')} onNewInvoiceForClient={()=>handleTabChange('invoices')}/>} {currentTab==='vendors'&&<VendorsView vendors={vendors} bookings={bookings} profile={profile} onCreateVendor={handleCreateVendor} onUpdateVendor={handleUpdateVendor} onDeleteVendor={handleDeleteVendor} onSelectBooking={handleSelectBooking}/>} {currentTab==='invoices'&&<InvoicesView invoices={invoices} clients={clients} bookings={bookings} profile={profile} settings={settings} onCreateInvoice={handleCreateInvoice} onUpdateInvoice={handleUpdateInvoice} onDeleteInvoice={handleDeleteInvoice} onDuplicateInvoice={handleDuplicateInvoice} onPreviewInvoice={inv=>setPreviewInvoice(inv)} onCreateClient={handleCreateClient}/>} {currentTab==='finance'&&<FinanceView profile={profile} bookings={bookings} invoices={invoices} onUpdateBooking={handleUpdateBooking}/>} {(currentTab==='settings-profile'||currentTab==='settings-invoice'||(currentTab as string)==='settings')&&<SettingsView profile={profile} settings={settings} initialTab={currentTab==='settings-invoice'?'invoice':'profile'} onSaveProfile={handleSaveProfile} onSaveSettings={handleSaveSettings}/>}</>}</ErrorBoundary></div></main></div></div>;
 }
