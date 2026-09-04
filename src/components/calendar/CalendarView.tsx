@@ -65,9 +65,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 </div>
                 <div className="space-y-1.5 mt-1.5 flex-1">
                   {dayBookings.map((b) => (
-                    <div key={b.id} onClick={() => onSelectBooking(b)} className="p-1.5 rounded-lg bg-slate-900 text-white text-xs cursor-pointer hover:bg-slate-800 shadow-2xs">
+                    <div key={b.id} onClick={() => onSelectBooking(b)} className={`p-1.5 rounded-lg text-white text-xs cursor-pointer shadow-2xs transition-colors ${b.bookingStatus === 'Completed' ? 'bg-red-600 hover:bg-red-700' : 'bg-slate-900 hover:bg-slate-800'}`}>
                       <div className="font-semibold truncate text-[11px] leading-tight flex items-center justify-between"><span>{b.clientName}</span><span className="text-[9px] px-1 py-0.2 rounded bg-white/20 font-mono">{b.eventType}</span></div>
-                      <div className="text-[10px] text-slate-300 truncate mt-0.5">{b.venue || 'Venue TBA'}</div>
+                      <div className={`text-[10px] truncate mt-0.5 ${b.bookingStatus === 'Completed' ? 'text-red-100' : 'text-slate-300'}`}>{b.bookingStatus === 'Completed' ? 'Event Completed' : (b.venue || 'Venue TBA')}</div>
                     </div>
                   ))}
                 </div>
