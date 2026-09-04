@@ -107,13 +107,14 @@ export default function App() {
   const handleDuplicateInvoice = async (id: string) => { const duplicate = await invoiceService.duplicateInvoice(id); setInvoices(await invoiceService.getInvoices()); return duplicate; };
   const handleSaveProfile = async (data: BusinessProfile) => { const saved = await businessService.saveProfile(data); setProfile(saved); return saved; };
   const handleSaveSettings = async (data: InvoiceSettings) => { const saved = await businessService.saveInvoiceSettings(data); setSettings(saved); return saved; };
+  const handleSaveLogo = async (logoUrl: string) => { await handleSaveProfile({ ...profile, logoUrl }); };
   const handleTabChange = (tab: NavTab) => { setCurrentTab(tab); setPreviewInvoice(null); };
   const handleSelectBooking = (booking: Booking) => { setSelectedBookingForDetail(booking); setCurrentTab('bookings'); setPreviewInvoice(null); };
 
   return <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-[#d4e1ec] via-[#e3ecf3] to-[#c8d8e5] flex text-slate-800 antialiased font-sans">
     <Sidebar currentTab={currentTab} onTabChange={handleTabChange} onSelectTab={handleTabChange} profile={profile} isMobileOpen={isMobileSidebarOpen} isOpenMobile={isMobileSidebarOpen} onCloseMobile={() => setIsMobileSidebarOpen(false)} />
     <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
-      <Header profile={profile} onOpenMobileMenu={() => setIsMobileSidebarOpen(true)} onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)} onNewInvoice={() => handleTabChange('invoices')} />
+      <Header profile={profile} onOpenMobileMenu={() => setIsMobileSidebarOpen(true)} onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)} onNewInvoice={() => handleTabChange('invoices')} onSaveLogo={handleSaveLogo} />
       <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 w-full"><div className="max-w-[1560px] mx-auto w-full"><ErrorBoundary>
         {previewInvoice ? <InvoicePreviewView invoice={previewInvoice} profile={profile} settings={settings} onBack={() => setPreviewInvoice(null)} onUpdateSettings={async updated => { await handleSaveSettings({ ...settings, ...updated }); }} /> : <>
           {currentTab === 'dashboard' && <DashboardView profile={profile} bookings={bookings} clients={clients} invoices={invoices} onNavigate={handleTabChange} onSelectBooking={handleSelectBooking} />}
