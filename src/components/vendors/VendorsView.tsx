@@ -1,16 +1,5 @@
 import React, { useState } from 'react';
-import {
-  Plus,
-  Search,
-  Building2,
-  Phone,
-  Mail,
-  MapPin,
-  Edit2,
-  Trash2,
-  CalendarCheck2,
-  FileSpreadsheet
-} from 'lucide-react';
+import { Plus, Search, Building2, Phone, Mail, MapPin, Edit2, Trash2, CalendarCheck2, Banknote, X } from 'lucide-react';
 import { Vendor, VendorCategory, Booking, BusinessProfile } from '../../types';
 import { Modal } from '../common/Modal';
 import { EmptyState } from '../common/EmptyState';
@@ -24,573 +13,60 @@ interface VendorsViewProps {
   onUpdateVendor: (id: string, vendor: Partial<Vendor>) => Promise<Vendor>;
   onDeleteVendor: (id: string) => Promise<boolean>;
   onSelectBooking: (booking: Booking) => void;
+  onUpdateBooking?: (id: string, updates: Partial<Booking>) => Promise<Booking>;
 }
 
-const VENDOR_CATEGORIES: VendorCategory[] = [
-  'Decorator',
-  'Caterer',
-  'Photographer',
-  'Videographer',
-  'Makeup Artist',
-  'Mehndi Artist',
-  'DJ / Sound',
-  'Florist',
-  'Venue',
-  'Furniture',
-  'Lighting',
-  'Transport',
-  'Other',
-];
+const VENDOR_CATEGORIES: VendorCategory[] = ['Decorator','Caterer','Photographer','Videographer','Makeup Artist','Mehndi Artist','DJ / Sound','Florist','Venue','Furniture','Lighting','Transport','Other'];
 
-export const VendorsView: React.FC<VendorsViewProps> = ({
-  vendors: inputVendors = [],
-  bookings: inputBookings = [],
-  profile: inputProfile,
-  onCreateVendor,
-  onUpdateVendor,
-  onDeleteVendor,
-  onSelectBooking,
-}) => {
+export const VendorsView: React.FC<VendorsViewProps> = ({ vendors: inputVendors = [], bookings: inputBookings = [], profile: inputProfile, onCreateVendor, onUpdateVendor, onDeleteVendor, onSelectBooking, onUpdateBooking }) => {
   const profile = inputProfile || initialBusinessProfile;
   const vendors = Array.isArray(inputVendors) ? inputVendors : [];
   const bookings = Array.isArray(inputBookings) ? inputBookings : [];
   const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<string>('All');
+  const [categoryFilter, setCategoryFilter] = useState('All');
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(vendors[0] || null);
-
-  // Modal form
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
+  const [paymentOpen, setPaymentOpen] = useState<{ bookingId: string; vendorId: string } | null>(null);
+  const [paymentForm, setPaymentForm] = useState({ amount: '', date: new Date().toISOString().slice(0,10), method: 'Cash', notes: '' });
+  const [formData, setFormData] = useState({ vendorName:'', category:'Decorator' as VendorCategory, contactPerson:'', phone:'', whatsApp:'', email:'', address:'', services:'', paymentTerms:'', notes:'' });
 
-  const [formData, setFormData] = useState({
-    vendorName: '',
-    category: 'Decorator' as VendorCategory,
-    contactPerson: '',
-    phone: '',
-    whatsApp: '',
-    email: '',
-    address: '',
-    services: '',
-    paymentTerms: '',
-    notes: '',
-  });
+  const resetForm = () => setFormData({ vendorName:'', category:'Decorator', contactPerson:'', phone:'', whatsApp:'', email:'', address:'', services:'', paymentTerms:'', notes:'' });
+  const openAddModal = () => { setEditingVendor(null); resetForm(); setIsFormOpen(true); };
+  const openEditModal = (vendor: Vendor) => { setEditingVendor(vendor); setFormData({ vendorName:vendor.vendorName || '', category:vendor.category, contactPerson:vendor.contactPerson || '', phone:vendor.phone || '', whatsApp:vendor.whatsApp || '', email:vendor.email || '', address:vendor.address || '', services:vendor.services || '', paymentTerms:vendor.paymentTerms || '', notes:vendor.notes || '' }); setIsFormOpen(true); };
+  const handleSubmit = async (e: React.FormEvent) => { e.preventDefault(); if (!formData.vendorName.trim()) return; if (editingVendor) { const updated = await onUpdateVendor(editingVendor.id, formData); setSelectedVendor(updated); } else { const created = await onCreateVendor(formData); setSelectedVendor(created); } setIsFormOpen(false); };
+  const handleDelete = async (id: string) => { if (!window.confirm('Are you sure you want to delete this vendor?')) return; await onDeleteVendor(id); if (selectedVendor?.id === id) setSelectedVendor(vendors.find(v => v.id !== id) || null); };
+  const filteredVendors = vendors.filter(v => { const q = searchTerm.toLowerCase(); return (v.vendorName || '').toLowerCase().includes(q) || (v.contactPerson || '').toLowerCase().includes(q) || (v.services || '').toLowerCase().includes(q); }).filter(v => categoryFilter === 'All' || v.category === categoryFilter);
+  const assignedBookings = selectedVendor ? bookings.filter(b => (b.assignedVendors || []).some(v => v.vendorId === selectedVendor.id)) : [];
 
-  const openAddModal = () => {
-    setEditingVendor(null);
-    setFormData({
-      vendorName: '',
-      category: 'Decorator',
-      contactPerson: '',
-      phone: '',
-      whatsApp: '',
-      email: '',
-      address: '',
-      services: '',
-      paymentTerms: '50% advance, 50% on event completion',
-      notes: '',
-    });
-    setIsFormOpen(true);
-  };
-
-  const openEditModal = (vendor: Vendor) => {
-    setEditingVendor(vendor);
-    setFormData({
-      vendorName: vendor.vendorName,
-      category: vendor.category,
-      contactPerson: vendor.contactPerson,
-      phone: vendor.phone,
-      whatsApp: vendor.whatsApp,
-      email: vendor.email,
-      address: vendor.address,
-      services: vendor.services,
-      paymentTerms: vendor.paymentTerms,
-      notes: vendor.notes || '',
-    });
-    setIsFormOpen(true);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const openPayment = (bookingId: string, vendorId: string) => { setPaymentForm({ amount:'', date:new Date().toISOString().slice(0,10), method:'Cash', notes:'' }); setPaymentOpen({ bookingId, vendorId }); };
+  const savePayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingVendor) {
-      const updated = await onUpdateVendor(editingVendor.id, formData);
-      if (selectedVendor?.id === editingVendor.id) {
-        setSelectedVendor(updated);
-      }
-    } else {
-      const created = await onCreateVendor(formData);
-      setSelectedVendor(created);
-    }
-    setIsFormOpen(false);
+    if (!paymentOpen || !onUpdateBooking) return;
+    const booking = bookings.find(b => b.id === paymentOpen.bookingId);
+    const assignment = booking?.assignedVendors?.find(v => v.vendorId === paymentOpen.vendorId);
+    const amount = Number(paymentForm.amount || 0);
+    if (!booking || !assignment || amount <= 0) return;
+    const agreed = Number(assignment.agreedAmount || 0);
+    const currentPaid = Number(assignment.paidAmount || 0);
+    const nextPaid = Math.min(agreed, currentPaid + amount);
+    await onUpdateBooking(booking.id, { assignedVendors: booking.assignedVendors.map(v => v.vendorId === assignment.vendorId ? { ...v, paidAmount: nextPaid, paymentStatus: nextPaid >= agreed ? 'Paid' : 'Pending', paymentDate: paymentForm.date, paymentMethod: paymentForm.method, paymentNotes: paymentForm.notes.trim() } : v) });
+    setPaymentOpen(null);
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this vendor?')) {
-      await onDeleteVendor(id);
-      if (selectedVendor?.id === id) {
-        setSelectedVendor(vendors.find((v) => v.id !== id) || null);
-      }
-    }
-  };
-
-  const filteredVendors = vendors.filter((v) => {
-    const matchesSearch =
-      v.vendorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      v.contactPerson.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      v.services.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = categoryFilter === 'All' || v.category === categoryFilter;
-    return matchesSearch && matchesCategory;
-  });
-
-  // Find bookings this vendor is assigned to
-  const assignedBookings = selectedVendor
-    ? bookings.filter((b) =>
-        b.assignedVendors.some((bv) => bv.vendorId === selectedVendor.id)
-      )
-    : [];
-
-  return (
-    <div className="space-y-6 animate-in fade-in duration-150">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#0f172a]">Vendors & Partners</h1>
-          <p className="text-slate-500 text-sm mt-0.5">
-            Caterers, decorators, cinematographers, sound artists and event suppliers
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={openAddModal}
-          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#0f172a] hover:bg-slate-800 active:scale-95 text-white text-sm font-semibold shadow-xl shadow-slate-200 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Vendor</span>
-        </button>
-      </div>
-
-      {/* Filter and Search Bar */}
-      <div className="glass-card p-4 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search vendors by name, contact person, services..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-sm bg-white/60 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900 focus:bg-white"
-          />
-        </div>
-
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          className="px-3 py-2 text-xs font-semibold bg-white/60 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-900"
-        >
-          <option value="All">All Categories</option>
-          {VENDOR_CATEGORIES.map((cat) => (
-            <option key={cat} value={cat}>
-              {cat}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Two Column Layout: List (5) and Dossier (7) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Vendor Cards List */}
-        <div className="lg:col-span-5 space-y-2 max-h-[700px] overflow-y-auto pr-1">
-          {filteredVendors.length === 0 ? (
-            <EmptyState
-              title="No vendors found"
-              description="Add vendors to your directory to assign them to bookings and track agreed payouts."
-              icon={Building2}
-              actionLabel="Add Vendor"
-              onAction={openAddModal}
-            />
-          ) : (
-            filteredVendors.map((vendor) => {
-              const isSelected = selectedVendor?.id === vendor.id;
-              return (
-                <div
-                  key={vendor.id}
-                  onClick={() => setSelectedVendor(vendor)}
-                  className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-slate-900 text-white border-slate-900 shadow-md'
-                      : 'bg-white/80 hover:bg-white border-slate-200/80 text-slate-900 shadow-xs'
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="font-bold text-sm leading-tight">{vendor.vendorName}</h3>
-                      <p
-                        className={`text-xs mt-1 ${
-                          isSelected ? 'text-slate-300' : 'text-slate-500'
-                        }`}
-                      >
-                        Contact: {vendor.contactPerson || 'Direct'}
-                      </p>
-                    </div>
-                    <span
-                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
-                        isSelected
-                          ? 'bg-white/10 text-white'
-                          : 'bg-slate-100 text-slate-700'
-                      }`}
-                    >
-                      {vendor.category}
-                    </span>
-                  </div>
-
-                  <p
-                    className={`text-xs mt-2 line-clamp-1 ${
-                      isSelected ? 'text-slate-300' : 'text-slate-500'
-                    }`}
-                  >
-                    {vendor.services || 'General Services'}
-                  </p>
-
-                  <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between text-xs">
-                    <span className={isSelected ? 'text-slate-300' : 'text-slate-500'}>
-                      {vendor.phone || vendor.email || 'No contact'}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditModal(vendor);
-                        }}
-                        className={`p-1 rounded ${
-                          isSelected
-                            ? 'text-slate-300 hover:text-white hover:bg-white/10'
-                            : 'text-slate-400 hover:text-slate-900 hover:bg-slate-100'
-                        }`}
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(vendor.id);
-                        }}
-                        className={`p-1 rounded ${
-                          isSelected
-                            ? 'text-rose-300 hover:text-rose-100 hover:bg-white/10'
-                            : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
-                        }`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Right Column: Selected Vendor Profile & Assigned Events */}
-        <div className="lg:col-span-7">
-          {selectedVendor ? (
-            <div className="space-y-6">
-              {/* Profile Card */}
-              <div className="glass-card p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-5 border-b border-slate-100">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-bold text-[#0f172a]">{selectedVendor.vendorName}</h2>
-                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 font-semibold">
-                        {selectedVendor.category}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Contact: <strong className="text-slate-700">{selectedVendor.contactPerson}</strong>
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => openEditModal(selectedVendor)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                    <span>Edit Vendor</span>
-                  </button>
-                </div>
-
-                {/* Contact grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-4 text-xs">
-                  <div className="flex items-center gap-2 text-slate-700">
-                    <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span>Phone: {selectedVendor.phone || 'N/A'}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-slate-700">
-                    <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span>Email: {selectedVendor.email || 'N/A'}</span>
-                  </div>
-                  {selectedVendor.whatsApp && (
-                    <div className="flex items-center gap-2 text-slate-700">
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
-                        WA
-                      </span>
-                      <span>WhatsApp: {selectedVendor.whatsApp}</span>
-                    </div>
-                  )}
-                  {selectedVendor.address && (
-                    <div className="flex items-center gap-2 text-slate-700">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span>{selectedVendor.address}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Services & Payment terms */}
-                <div className="space-y-3 pt-3 border-t border-slate-100 text-xs">
-                  <div>
-                    <span className="font-bold text-slate-700 block mb-0.5">Offered Services:</span>
-                    <p className="text-slate-600">{selectedVendor.services || 'Not listed'}</p>
-                  </div>
-                  <div>
-                    <span className="font-bold text-slate-700 block mb-0.5">Payment Terms:</span>
-                    <p className="text-slate-600">{selectedVendor.paymentTerms || 'Standard'}</p>
-                  </div>
-                  {selectedVendor.notes && (
-                    <div>
-                      <span className="font-bold text-slate-700 block mb-0.5">Internal Notes:</span>
-                      <p className="text-slate-500 italic">{selectedVendor.notes}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Bookings this vendor is assigned to */}
-              <div className="glass-card p-5">
-                <h3 className="text-sm font-bold text-[#0f172a] pb-3 border-b border-slate-100 flex items-center gap-2">
-                  <CalendarCheck2 className="w-4 h-4 text-slate-500" />
-                  <span>Assigned Events ({assignedBookings.length})</span>
-                </h3>
-
-                {assignedBookings.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic py-4 text-center">
-                    This vendor is not currently assigned to any scheduled event.
-                  </p>
-                ) : (
-                  <div className="divide-y divide-slate-100 mt-2">
-                    {assignedBookings.map((b) => {
-                      const assignment = b.assignedVendors.find(
-                        (bv) => bv.vendorId === selectedVendor.id
-                      );
-                      return (
-                        <div
-                          key={b.id}
-                          onClick={() => onSelectBooking(b)}
-                          className="py-3 flex items-center justify-between hover:bg-slate-50/80 p-2 rounded-xl cursor-pointer transition-colors"
-                        >
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-slate-900 text-sm">
-                                {b.clientName}
-                              </span>
-                              <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium">
-                                {b.eventType}
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              {b.eventDate} • {b.venue || 'Venue TBA'}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <span className="font-semibold text-slate-900 text-xs">
-                              {profile.currencySymbol}
-                              {assignment?.agreedAmount?.toLocaleString() || 0}
-                            </span>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              {assignment?.paymentStatus || 'Pending'}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="p-12 text-center text-slate-400 text-sm bg-white/60 rounded-2xl border border-slate-200/60">
-              Select a vendor to view details and assigned event engagements.
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Add / Edit Vendor Modal */}
-      <Modal
-        isOpen={isFormOpen}
-        onClose={() => setIsFormOpen(false)}
-        title={editingVendor ? 'Edit Vendor Information' : 'Add New Vendor'}
-        subtitle="Catalog suppliers, caterers, photographers and contracted specialists"
-        maxWidth="lg"
-      >
-        <form onSubmit={handleSubmit} className="space-y-4 text-sm">
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Vendor / Company Name <span className="text-rose-500">*</span>
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Royal Flora & Decors"
-              value={formData.vendorName}
-              onChange={(e) => setFormData({ ...formData, vendorName: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Category
-              </label>
-              <select
-                value={formData.category}
-                onChange={(e) =>
-                  setFormData({ ...formData, category: e.target.value as VendorCategory })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm"
-              >
-                {VENDOR_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Contact Person
-              </label>
-              <input
-                type="text"
-                placeholder="Manager / Lead"
-                value={formData.contactPerson}
-                onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Phone
-              </label>
-              <input
-                type="tel"
-                placeholder="+92 300 1234567"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                WhatsApp
-              </label>
-              <input
-                type="tel"
-                placeholder="+92 300 1234567"
-                value={formData.whatsApp}
-                onChange={(e) => setFormData({ ...formData, whatsApp: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Email
-            </label>
-            <input
-              type="email"
-              placeholder="vendor@example.com"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Address / Studio Location
-            </label>
-            <input
-              type="text"
-              placeholder="Commercial area, City"
-              value={formData.address}
-              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Services Offered
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Stage design, fresh flower centerpieces, drone filming"
-              value={formData.services}
-              onChange={(e) => setFormData({ ...formData, services: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Payment Terms
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. 50% booking, 50% post-event"
-              value={formData.paymentTerms}
-              onChange={(e) => setFormData({ ...formData, paymentTerms: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Internal Notes
-            </label>
-            <textarea
-              rows={2}
-              placeholder="Reliability, crew quality, backup contacts..."
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setIsFormOpen(false)}
-              className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-medium text-xs sm:text-sm"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs sm:text-sm shadow-xs"
-            >
-              {editingVendor ? 'Save Changes' : 'Create Vendor'}
-            </button>
-          </div>
-        </form>
-      </Modal>
+  return <div className="space-y-6 animate-in fade-in duration-150">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"><div><h1 className="text-2xl font-semibold tracking-tight text-[#0f172a]">Vendors & Partners</h1><p className="text-slate-500 text-sm mt-1">Manage your event vendors, assignments and payments.</p></div><button type="button" onClick={openAddModal} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0f172a] text-white text-sm font-medium shadow-lg"><Plus className="w-4 h-4"/> Add Vendor</button></div>
+    <div className="glass-card p-4 flex flex-col sm:flex-row gap-3"><div className="relative flex-1"><Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"/><input value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} placeholder="Search vendors..." className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/70 border border-slate-200 rounded-xl outline-none"/></div><select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)} className="px-3 py-2.5 text-sm bg-white/70 border border-slate-200 rounded-xl outline-none"><option>All</option>{VENDOR_CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div>
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="lg:col-span-5 space-y-2 max-h-[700px] overflow-y-auto pr-1">{filteredVendors.length===0?<EmptyState title="No vendors found" description="Add vendors to your directory to assign them to bookings and track payments." icon={Building2} actionLabel="Add Vendor" onAction={openAddModal}/>:filteredVendors.map(v=>{const selected=selectedVendor?.id===v.id; return <div key={v.id} onClick={()=>setSelectedVendor(v)} className={`p-4 rounded-2xl border cursor-pointer transition-all ${selected?'bg-slate-900 text-white border-slate-900 shadow-md':'bg-white/80 hover:bg-white border-slate-200 text-slate-900'}`}><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-sm">{v.vendorName}</h3><p className={`text-xs mt-1 ${selected?'text-slate-300':'text-slate-500'}`}>{v.contactPerson || 'No contact person'}</p></div><span className={`text-[10px] px-2 py-1 rounded-md font-medium ${selected?'bg-white/10':'bg-slate-100'}`}>{v.category}</span></div><p className={`text-xs mt-2 line-clamp-1 ${selected?'text-slate-300':'text-slate-500'}`}>{v.services || 'General services'}</p><div className="mt-3 pt-2.5 border-t border-white/10 flex justify-between items-center"><span className={`text-xs ${selected?'text-slate-300':'text-slate-500'}`}>{v.phone || v.whatsApp || v.email || 'No contact details'}</span><div className="flex gap-1"><button type="button" onClick={e=>{e.stopPropagation();openEditModal(v)}} className="p-1.5 rounded-lg hover:bg-white/10"><Edit2 className="w-3.5 h-3.5"/></button><button type="button" onClick={e=>{e.stopPropagation();handleDelete(v.id)}} className="p-1.5 rounded-lg hover:bg-rose-50 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5"/></button></div></div></div>})}</div>
+      <div className="lg:col-span-7">{selectedVendor?<div className="space-y-5">
+        <div className="glass-card p-6"><div className="flex items-center justify-between gap-3 pb-5 border-b border-slate-100"><div><h2 className="text-xl font-semibold text-[#0f172a]">{selectedVendor.vendorName}</h2><span className="text-xs text-slate-500">{selectedVendor.category}</span></div><button type="button" onClick={()=>openEditModal(selectedVendor)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-medium"><Edit2 className="w-3.5 h-3.5"/> Edit</button></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-4 text-xs"><div className="flex gap-2"><Phone className="w-3.5 h-3.5 text-slate-400"/>Phone: {selectedVendor.phone || 'N/A'}</div><div className="flex gap-2"><Mail className="w-3.5 h-3.5 text-slate-400"/>Email: {selectedVendor.email || 'N/A'}</div>{selectedVendor.whatsApp&&<div>WhatsApp: {selectedVendor.whatsApp}</div>}{selectedVendor.address&&<div className="flex gap-2"><MapPin className="w-3.5 h-3.5 text-slate-400"/>{selectedVendor.address}</div>}</div><div className="pt-3 border-t border-slate-100 space-y-3 text-xs"><div><b>Services:</b> {selectedVendor.services || 'Not specified'}</div><div><b>Payment Terms:</b> {selectedVendor.paymentTerms || 'Not specified'}</div>{selectedVendor.notes&&<div><b>Notes:</b> {selectedVendor.notes}</div>}</div></div>
+        <div className="glass-card p-5"><div className="flex items-center justify-between pb-3 border-b border-slate-100"><h3 className="text-sm font-semibold flex items-center gap-2"><CalendarCheck2 className="w-4 h-4 text-slate-500"/>Assigned Events ({assignedBookings.length})</h3></div>{assignedBookings.length===0?<p className="py-7 text-center text-xs text-slate-400">Assign this vendor to a booking first. Payment can then be recorded here.</p>:<div className="divide-y divide-slate-100">{assignedBookings.map(b=>{const a=b.assignedVendors.find(v=>v.vendorId===selectedVendor.id);const agreed=Number(a?.agreedAmount||0);const paid=Math.min(Number(a?.paidAmount||0),agreed);const balance=Math.max(0,agreed-paid);return <div key={b.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div onClick={()=>onSelectBooking(b)} className="cursor-pointer"><div className="font-medium text-sm text-slate-900">{b.clientName} <span className="text-[10px] px-2 py-1 rounded bg-slate-100 ml-1">{b.eventType}</span></div><div className="text-xs text-slate-500 mt-1">{b.eventDate} • Agreed {profile.currencySymbol}{agreed.toLocaleString()}</div><div className="text-[11px] mt-1"><span className="text-emerald-700">Paid {profile.currencySymbol}{paid.toLocaleString()}</span><span className="text-amber-700 ml-3">Balance {profile.currencySymbol}{balance.toLocaleString()}</span></div></div><button type="button" disabled={balance<=0 || !onUpdateBooking} onClick={()=>openPayment(b.id,selectedVendor.id)} className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium ${balance>0?'bg-slate-900 text-white hover:bg-slate-800':'bg-emerald-50 text-emerald-700'}`}>{balance>0?<><Banknote className="w-3.5 h-3.5"/> Record Payment</>:<>Paid</>}</button></div>})}</div>}</div>
+      </div>:<div className="p-12 text-center text-slate-400 text-sm bg-white/60 rounded-2xl border border-slate-200">Select a vendor to view details.</div>}</div>
     </div>
-  );
+
+    <Modal isOpen={isFormOpen} onClose={()=>setIsFormOpen(false)} title={editingVendor?'Edit Vendor Information':'Add New Vendor'} subtitle="Only Vendor / Company Name is required. All other details are optional." maxWidth="lg"><form onSubmit={handleSubmit} className="space-y-4 text-sm"><div><label className="block text-xs font-semibold text-slate-700 mb-1">Vendor / Company Name <span className="text-rose-500">*</span></label><input required value={formData.vendorName} onChange={e=>setFormData({...formData,vendorName:e.target.value})} placeholder="e.g. Royal Flora & Decors" className="w-full px-3 py-2.5 rounded-xl border border-slate-200"/></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div><label className="block text-xs font-semibold text-slate-700 mb-1">Category <span className="text-slate-400 font-normal">(optional)</span></label><select value={formData.category} onChange={e=>setFormData({...formData,category:e.target.value as VendorCategory})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white">{VENDOR_CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div><div><label className="block text-xs font-semibold text-slate-700 mb-1">Contact Person <span className="text-slate-400 font-normal">(optional)</span></label><input value={formData.contactPerson} onChange={e=>setFormData({...formData,contactPerson:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200"/></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div><label className="block text-xs font-semibold text-slate-700 mb-1">Phone <span className="text-slate-400 font-normal">(optional)</span></label><input type="tel" value={formData.phone} onChange={e=>setFormData({...formData,phone:e.target.value})} placeholder="+92..." className="w-full px-3 py-2.5 rounded-xl border border-slate-200"/></div><div><label className="block text-xs font-semibold text-slate-700 mb-1">WhatsApp <span className="text-slate-400 font-normal">(optional)</span></label><input type="tel" value={formData.whatsApp} onChange={e=>setFormData({...formData,whatsApp:e.target.value})} placeholder="If available" className="w-full px-3 py-2.5 rounded-xl border border-slate-200"/></div></div><div><label className="block text-xs font-semibold text-slate-700 mb-1">Email <span className="text-slate-400 font-normal">(optional)</span></label><input type="email" value={formData.email} onChange={e=>setFormData({...formData,email:e.target.value})} placeholder="If available" className="w-full px-3 py-2.5 rounded-xl border border-slate-200"/></div><div><label className="block text-xs font-semibold text-slate-700 mb-1">Address / Location <span className="text-slate-400 font-normal">(optional)</span></label><input value={formData.address} onChange={e=>setFormData({...formData,address:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200"/></div><div><label className="block text-xs font-semibold text-slate-700 mb-1">Services Offered <span className="text-slate-400 font-normal">(optional)</span></label><input value={formData.services} onChange={e=>setFormData({...formData,services:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200"/></div><div><label className="block text-xs font-semibold text-slate-700 mb-1">Payment Terms <span className="text-slate-400 font-normal">(optional)</span></label><input value={formData.paymentTerms} onChange={e=>setFormData({...formData,paymentTerms:e.target.value})} placeholder="e.g. 50% advance" className="w-full px-3 py-2.5 rounded-xl border border-slate-200"/></div><div><label className="block text-xs font-semibold text-slate-700 mb-1">Internal Notes <span className="text-slate-400 font-normal">(optional)</span></label><textarea rows={2} value={formData.notes} onChange={e=>setFormData({...formData,notes:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 resize-none"/></div><div className="flex justify-end gap-2 pt-3 border-t border-slate-100"><button type="button" onClick={()=>setIsFormOpen(false)} className="px-4 py-2 rounded-xl border border-slate-200 text-xs">Cancel</button><button type="submit" className="px-5 py-2 rounded-xl bg-slate-900 text-white text-xs font-medium">{editingVendor?'Save Changes':'Save Vendor'}</button></div></form></Modal>
+
+    {paymentOpen&&<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/20 backdrop-blur-sm"><form onSubmit={savePayment} className="w-full max-w-md glass-panel p-6 shadow-2xl"><div className="flex items-center justify-between mb-5"><div><h2 className="text-lg font-semibold">Record Vendor Payment</h2><p className="text-xs text-slate-500 mt-1">Record the amount paid now. Partial payments are supported.</p></div><button type="button" onClick={()=>setPaymentOpen(null)} className="p-2 rounded-xl hover:bg-white/70"><X className="w-4 h-4"/></button></div><div className="space-y-4"><div><label className="text-xs font-medium text-slate-600">Payment Amount</label><input required min="0.01" type="number" value={paymentForm.amount} onChange={e=>setPaymentForm({...paymentForm,amount:e.target.value})} placeholder="0" className="mt-1 w-full px-3 py-2.5 rounded-xl bg-white border border-slate-200"/></div><div className="grid grid-cols-2 gap-3"><div><label className="text-xs font-medium text-slate-600">Payment Date</label><input required type="date" value={paymentForm.date} onChange={e=>setPaymentForm({...paymentForm,date:e.target.value})} className="mt-1 w-full px-3 py-2.5 rounded-xl bg-white border border-slate-200"/></div><div><label className="text-xs font-medium text-slate-600">Payment Method</label><select value={paymentForm.method} onChange={e=>setPaymentForm({...paymentForm,method:e.target.value})} className="mt-1 w-full px-3 py-2.5 rounded-xl bg-white border border-slate-200"><option>Cash</option><option>Bank Transfer</option><option>JazzCash</option><option>EasyPaisa</option><option>Other</option></select></div></div><div><label className="text-xs font-medium text-slate-600">Notes <span className="text-slate-400">(optional)</span></label><textarea rows={2} value={paymentForm.notes} onChange={e=>setPaymentForm({...paymentForm,notes:e.target.value})} className="mt-1 w-full px-3 py-2.5 rounded-xl bg-white border border-slate-200 resize-none"/></div></div><button type="submit" className="mt-5 w-full py-2.5 rounded-xl bg-slate-900 text-white text-xs font-medium">Save Payment</button></form></div>}
+  </div>;
 };
