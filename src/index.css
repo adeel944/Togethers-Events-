@@ -1,8 +1,17 @@
 @import "tailwindcss";
 
 @layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
   body {
-    background-color: #dbe4ec;
+    background:
+      radial-gradient(circle at 15% 10%, rgba(255, 255, 255, 0.72), transparent 34%),
+      radial-gradient(circle at 85% 20%, rgba(191, 211, 226, 0.48), transparent 38%),
+      linear-gradient(135deg, #d7e3ed 0%, #e7eef4 48%, #ccdbe6 100%);
     color: #0f172a;
     font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     letter-spacing: -0.015em;
@@ -11,39 +20,40 @@
   }
 }
 
-/* Reference Design Frosted Glass Surfaces */
+/* Frosted-glass reference surfaces */
 .glass-panel {
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.85);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.70), rgba(255, 255, 255, 0.48));
+  backdrop-filter: blur(24px) saturate(125%);
+  -webkit-backdrop-filter: blur(24px) saturate(125%);
+  border: 1px solid rgba(255, 255, 255, 0.78);
   border-radius: 28px;
-  box-shadow: 0 10px 30px -5px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 18px 45px -20px rgba(15, 23, 42, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .glass-card {
-  background: rgba(255, 255, 255, 0.76);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.85);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.54));
+  backdrop-filter: blur(20px) saturate(120%);
+  -webkit-backdrop-filter: blur(20px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.82);
   border-radius: 24px;
-  box-shadow: 0 8px 24px -4px rgba(15, 23, 42, 0.035);
+  box-shadow: 0 12px 32px -14px rgba(15, 23, 42, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.68);
 }
 
 .glass-card-subtle {
-  background: rgba(255, 255, 255, 0.58);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(16px) saturate(120%);
+  -webkit-backdrop-filter: blur(16px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.72);
   border-radius: 20px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
 .glass-pill {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  box-shadow: 0 6px 18px -10px rgba(15, 23, 42, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 
 .stat-card {
@@ -52,10 +62,10 @@
 }
 
 .table-row {
-  border-bottom: 1px solid rgba(241, 245, 249, 0.8);
+  border-bottom: 1px solid rgba(241, 245, 249, 0.72);
 }
 
-/* Custom soft scrollbar */
+/* Soft scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -64,11 +74,11 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.4);
+  background: rgba(100, 116, 139, 0.28);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.6);
+  background: rgba(100, 116, 139, 0.48);
 }
 
 @media print {
@@ -76,15 +86,12 @@
     background: #ffffff !important;
     color: #000000 !important;
   }
-  
   .no-print, nav, aside, header, .print-hide {
     display: none !important;
   }
-  
   .print-only {
     display: block !important;
   }
-  
   .print-container {
     width: 100% !important;
     margin: 0 !important;
@@ -93,10 +100,8 @@
     border: none !important;
     background: transparent !important;
   }
-
   @page {
     size: A4 portrait;
     margin: 10mm 12mm;
   }
 }
-
