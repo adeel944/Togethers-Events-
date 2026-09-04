@@ -10,7 +10,7 @@ export const FinanceView:React.FC<FinanceViewProps>=({bookings=[],invoices=[],pr
  const currency=profile?.currencySymbol||'Rs. ';
  const [expenses,setExpenses]=useState<BusinessExpense[]>(()=>{try{const raw=localStorage.getItem(EXPENSE_KEY);return raw?JSON.parse(raw):[]}catch{return[]}});
  const [isOpen,setIsOpen]=useState(false);
- const [paymentOpen,setPaymentOpen]=useState<{bookingId:string;vendorId:string}|null>(null);
+ const [paymentOpen,setPaymentOpen]=useState<{bookingId:string;vendorId:string}|null>(null); const [vendorPaymentPickerOpen,setVendorPaymentPickerOpen]=useState(false); const [selectedVendorRow,setSelectedVendorRow]=useState<{bookingId:string;vendorId:string}|null>(null);
  const [paymentForm,setPaymentForm]=useState({amount:'',date:new Date().toISOString().slice(0,10),method:'Cash',notes:''});
  const [form,setForm]=useState({title:'',category:'Operations' as BusinessExpense['category'],amount:'',date:new Date().toISOString().slice(0,10),notes:''});
  const money=(n:number)=>`${currency}${Number(n||0).toLocaleString()}`;
