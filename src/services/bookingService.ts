@@ -53,7 +53,10 @@ function mapBooking(row: any, vendorRows: any[] = [], clientName = ''): Booking 
 async function getVendorRows(bookingIds: string[]): Promise<any[]> {
   if (!bookingIds.length) return [];
   const { data, error } = await supabase.from('booking_vendors').select('*').in('booking_id', bookingIds);
-  if (error) throw error;
+  if (error) {
+    console.warn('Could not load booking vendors; continuing without vendor assignments:', error);
+    return [];
+  }
   return data || [];
 }
 
@@ -61,7 +64,10 @@ async function getClientNames(clientIds: string[]): Promise<Record<string, strin
   const ids = [...new Set(clientIds.filter(Boolean))];
   if (!ids.length) return {};
   const { data, error } = await supabase.from('clients').select('id,full_name').in('id', ids);
-  if (error) throw error;
+  if (error) {
+    console.warn('Could not load booking client names; continuing with stored booking names:', error);
+    return {};
+  }
   return Object.fromEntries((data || []).map((c: any) => [c.id, c.full_name]));
 }
 
