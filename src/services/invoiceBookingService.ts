@@ -19,13 +19,15 @@ export async function createInvoiceWithBooking(
   const totalAmount = Math.max(0, subtotal - discount + tax);
   const advancePaid = Math.max(0, Number(invoiceData.advancePaid) || 0);
   const packageName = normalizedItems[0]?.description?.trim() || 'Custom Package';
+  // Keep the New Invoice form visually blank, but satisfy the database's required issue_date
+  // when the user leaves Issue Date empty.
+  const issueDate = invoiceData.issueDate || new Date().toISOString().split('T')[0];
 
-  // Create the invoice first. This guarantees that Save Invoice is not blocked
-  // by the secondary linked-booking operation.
   let invoice: Invoice;
   try {
     invoice = await invoiceService.createInvoice({
       ...invoiceData,
+      issueDate,
       items: normalizedItems,
       bookingId: undefined,
       subtotal,
@@ -55,7 +57,6 @@ export async function createInvoiceWithBooking(
       assignedVendors: [],
     });
 
-    // Link the already-saved invoice to its booking.
     const linkedInvoice = await invoiceService.updateInvoice(invoice.id, { bookingId: booking.id });
     return { invoice: linkedInvoice, booking };
   } catch (error) {
