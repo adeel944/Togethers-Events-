@@ -1,10 +1,11 @@
 import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 import { Invoice, BusinessProfile } from '../types';
 
 export const printInvoice = () => window.print();
 
-const waitForInvoiceAssets = async (element: HTMLElement, doc: Document = document) => {
-  if (doc.fonts?.ready) await doc.fonts.ready;
+const waitForInvoiceAssets = async (element: HTMLElement) => {
+  if (document.fonts?.ready) await document.fonts.ready;
   const images = Array.from(element.querySelectorAll('img'));
   await Promise.all(images.map((img) => img.complete ? Promise.resolve() : new Promise<void>((resolve) => {
     img.addEventListener('load', () => resolve(), { once: true });
@@ -12,124 +13,181 @@ const waitForInvoiceAssets = async (element: HTMLElement, doc: Document = docume
   })));
 };
 
-const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+const nextFrame = () => new Promise<void>((resolve) => {
+  requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+});
 
 const getSafeFilename = (invoiceNumber: string) => {
-  const safeNumber = String(invoiceNumber || 'invoice').replace(/[\\/:*?"<>|]+/g, '-').trim();
+  const safeNumber = String(invoiceNumber || 'invoice')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .trim();
   return `Invoice-${safeNumber || 'invoice'}.pdf`;
 };
 
-/**
- * Read the CSSOM instead of passing stylesheet elements to html2canvas.
- * The browser's native SVG foreignObject renderer handles modern CSS colors
- * such as oklab()/oklch(), so those functions never reach an html2canvas parser.
- */
-const collectStylesheetText = (): string => {
-  const chunks: string[] = [];
+const legacyColorContext = document.createElement('canvas').getContext('2d');
 
-  for (const sheet of Array.from(document.styleSheets)) {
-    try {
-      const rules = Array.from(sheet.cssRules || []);
-      if (rules.length) chunks.push(rules.map((rule) => rule.cssText).join('\n'));
-    } catch {
-      // Ignore inaccessible cross-origin stylesheets. The invoice clone still
-      // contains the live DOM styling, and same-origin application styles are
-      // normally exposed through cssRules.
-    }
+const toLegacyColor = (value: string) => {
+  const raw = String(value || '').trim();
+  if (!raw || raw === 'transparent' || raw === 'none') return raw;
+  if (!legacyColorContext) return raw;
+
+  try {
+    legacyColorContext.fillStyle = '#000000';
+    legacyColorContext.fillStyle = raw;
+    return legacyColorContext.fillStyle || raw;
+  } catch {
+    return raw;
   }
-
-  return chunks.join('\n');
 };
 
-const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement): Promise<HTMLCanvasElement> => {
+const containsUnsupportedColorFunction = (value: string) =>
+  /(?:oklch|oklab|color)\s*\(/i.test(value || '');
+
+/**
+ * Freeze the invoice's already-rendered appearance into inline CSS.
+ * html2canvas then has no app stylesheet to parse, which prevents modern
+ * oklab()/oklch() CSS from reaching its CSS parser.
+ */
+const freezeComputedStyles = (source: HTMLElement, clone: HTMLElement) => {
+  const sourceNodes = [source, ...Array.from(source.querySelectorAll<HTMLElement>('*'))];
+  const cloneNodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
+  const count = Math.min(sourceNodes.length, cloneNodes.length);
+
+  for (let i = 0; i < count; i += 1) {
+    const sourceNode = sourceNodes[i];
+    const cloneNode = cloneNodes[i];
+    const computed = window.getComputedStyle(sourceNode);
+
+    cloneNode.removeAttribute('class');
+    cloneNode.removeAttribute('style');
+
+    for (let p = 0; p < computed.length; p += 1) {
+      const property = computed.item(p);
+      if (!property || property.startsWith('--')) continue;
+
+      let value = computed.getPropertyValue(property);
+      if (!value) continue;
+
+      if (property === 'background-image' || property === 'mask-image' || property === 'border-image-source') {
+        if (containsUnsupportedColorFunction(value)) value = 'none';
+      } else if (property.endsWith('color') || property === 'color' || property === 'caret-color') {
+        if (value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)') value = toLegacyColor(value);
+      } else if (containsUnsupportedColorFunction(value)) {
+        // Keep the layout property but remove an unsupported color-bearing effect.
+        if (property.includes('shadow')) value = 'none';
+        else continue;
+      }
+
+      try {
+        cloneNode.style.setProperty(property, value, computed.getPropertyPriority(property));
+      } catch {
+        // Some browser-generated/read-only values cannot be reapplied inline.
+      }
+    }
+
+    // Pseudo-elements are not available as DOM nodes. Most invoice templates do
+    // not depend on them; disabling them avoids stylesheet parsing altogether.
+    cloneNode.style.setProperty('background-image',
+      containsUnsupportedColorFunction(cloneNode.style.backgroundImage) ? 'none' : cloneNode.style.backgroundImage);
+  }
+};
+
+const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
   await waitForInvoiceAssets(invoiceSheet);
   await nextFrame();
 
-  const WIDTH = 794;
-  const exportClone = invoiceSheet.cloneNode(true) as HTMLElement;
-  exportClone.removeAttribute('id');
+  const rect = invoiceSheet.getBoundingClientRect();
+  const width = Math.max(1, Math.round(rect.width || invoiceSheet.scrollWidth || 794));
 
-  // Use a fixed A4 CSS-pixel coordinate system so the resulting PDF does not
-  // inherit responsive dashboard widths or unexpectedly enlarge the typography.
-  exportClone.style.width = `${WIDTH}px`;
-  exportClone.style.minWidth = `${WIDTH}px`;
-  exportClone.style.maxWidth = `${WIDTH}px`;
-  exportClone.style.margin = '0';
-  exportClone.style.boxSizing = 'border-box';
-  exportClone.style.background = '#ffffff';
-  exportClone.style.overflow = 'visible';
+  const clone = invoiceSheet.cloneNode(true) as HTMLElement;
+  clone.setAttribute('data-pdf-export', 'true');
+  clone.style.position = 'fixed';
+  clone.style.left = '-100000px';
+  clone.style.top = '0';
+  clone.style.width = `${width}px`;
+  clone.style.minWidth = `${width}px`;
+  clone.style.maxWidth = `${width}px`;
+  clone.style.height = 'auto';
+  clone.style.margin = '0';
+  clone.style.overflow = 'visible';
+  clone.style.background = '#ffffff';
+  clone.style.boxSizing = 'border-box';
 
-  const styles = collectStylesheetText();
-
-  const measurer = document.createElement('div');
-  measurer.style.position = 'fixed';
-  measurer.style.left = '-100000px';
-  measurer.style.top = '0';
-  measurer.style.width = `${WIDTH}px`;
-  measurer.style.minWidth = `${WIDTH}px`;
-  measurer.style.maxWidth = `${WIDTH}px`;
-  measurer.style.background = '#fff';
-  measurer.style.overflow = 'visible';
-  measurer.appendChild(exportClone);
-  document.body.appendChild(measurer);
+  const holder = document.createElement('div');
+  holder.style.position = 'fixed';
+  holder.style.left = '-100000px';
+  holder.style.top = '0';
+  holder.style.width = `${width}px`;
+  holder.style.minWidth = `${width}px`;
+  holder.style.maxWidth = `${width}px`;
+  holder.style.padding = '0';
+  holder.style.margin = '0';
+  holder.style.background = '#ffffff';
+  holder.style.overflow = 'visible';
+  holder.appendChild(clone);
+  document.body.appendChild(holder);
 
   try {
-    await waitForInvoiceAssets(exportClone);
+    // Read the actual on-screen invoice appearance before stripping stylesheets.
+    const sourceNodes = [invoiceSheet, ...Array.from(invoiceSheet.querySelectorAll<HTMLElement>('*'))];
+    const cloneNodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
+    const sourceHeight = Math.max(
+      invoiceSheet.scrollHeight,
+      invoiceSheet.getBoundingClientRect().height,
+      1,
+    );
+
+    freezeComputedStyles(invoiceSheet, clone);
+
+    // html2canvas gets only this isolated, inline-styled clone. No stylesheet
+    // containing Tailwind's oklab/oklch values is present in the export tree.
     await nextFrame();
 
-    const height = Math.max(exportClone.scrollHeight, exportClone.getBoundingClientRect().height, 1);
-    const safeHeight = Math.ceil(height);
-    const cloneMarkup = exportClone.outerHTML;
+    const height = Math.max(
+      Math.ceil(sourceHeight),
+      Math.ceil(clone.scrollHeight),
+      Math.ceil(clone.getBoundingClientRect().height),
+      1,
+    );
 
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${WIDTH}" height="${safeHeight}" viewBox="0 0 ${WIDTH} ${safeHeight}">
-  <foreignObject x="0" y="0" width="${WIDTH}" height="${safeHeight}">
-    <div xmlns="http://www.w3.org/1999/xhtml" style="width:${WIDTH}px;min-width:${WIDTH}px;max-width:${WIDTH}px;background:#ffffff;box-sizing:border-box;">
-      <style>${styles}</style>
-      <style>
-        html, body { margin:0 !important; padding:0 !important; width:${WIDTH}px !important; min-width:${WIDTH}px !important; max-width:${WIDTH}px !important; background:#ffffff !important; }
-        *, *::before, *::after { box-sizing:border-box; }
-        .print-container { width:${WIDTH}px !important; min-width:${WIDTH}px !important; max-width:${WIDTH}px !important; margin:0 !important; }
-        img { max-width:100%; }
-        body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-      </style>
-      ${cloneMarkup}
-    </div>
-  </foreignObject>
-</svg>`;
+    const renderScale = 2;
+    const canvas = await html2canvas(clone, {
+      scale: renderScale,
+      width,
+      height,
+      windowWidth: width,
+      windowHeight: Math.max(height, 1000),
+      x: 0,
+      y: 0,
+      scrollX: 0,
+      scrollY: 0,
+      backgroundColor: '#ffffff',
+      useCORS: true,
+      allowTaint: false,
+      imageTimeout: 15000,
+      logging: false,
+      removeContainer: true,
+      onclone: (clonedDocument) => {
+        // Remove every stylesheet from html2canvas's cloned document. All visible
+        // appearance is already frozen as inline styles above.
+        clonedDocument.querySelectorAll('style, link[rel="stylesheet"]').forEach((node) => node.remove());
+        const root = clonedDocument.querySelector('[data-pdf-export="true"]') as HTMLElement | null;
+        if (root) {
+          root.style.position = 'static';
+          root.style.left = 'auto';
+          root.style.top = 'auto';
+          root.style.transform = 'none';
+        }
+      },
+    });
 
-    const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-    const svgUrl = URL.createObjectURL(svgBlob);
-
-    try {
-      const image = new Image();
-      image.decoding = 'sync';
-
-      await new Promise<void>((resolve, reject) => {
-        image.onload = () => resolve();
-        image.onerror = () => reject(new Error('Could not render invoice for PDF export.'));
-        image.src = svgUrl;
-      });
-
-      const scale = 2;
-      const canvas = document.createElement('canvas');
-      canvas.width = WIDTH * scale;
-      canvas.height = safeHeight * scale;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Could not create PDF canvas.');
-
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.setTransform(scale, 0, 0, scale, 0, 0);
-      ctx.drawImage(image, 0, 0, WIDTH, safeHeight);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-      return canvas;
-    } finally {
-      URL.revokeObjectURL(svgUrl);
+    if (!canvas.width || !canvas.height) {
+      throw new Error('Could not render invoice for PDF export.');
     }
+
+    return canvas;
   } finally {
-    measurer.remove();
+    holder.remove();
   }
 };
 
@@ -140,52 +198,86 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   const invoiceSheet = source.querySelector<HTMLElement>('.print-container') || source;
   const canvas = await renderInvoiceToCanvas(invoiceSheet);
 
-  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+    compress: true,
+  });
+
   const pdfWidth = pdf.internal.pageSize.getWidth();
-  const pdfPageHeight = pdf.internal.pageSize.getHeight();
-  const pageCanvasHeight = Math.max(1, Math.floor((canvas.width * pdfPageHeight) / pdfWidth));
+  const pdfHeight = pdf.internal.pageSize.getHeight();
+  const imageWidthPx = canvas.width;
+  const imageHeightPx = canvas.height;
 
-  let offsetY = 0;
-  let pageIndex = 0;
+  // Fit the rendered invoice to the A4 page without distorting the layout.
+  // The same proportional scale is used for every page, so text and spacing
+  // remain consistent with the preview.
+  const cssWidth = Math.max(1, invoiceSheet.getBoundingClientRect().width || 794);
+  const cssHeight = Math.max(1, imageHeightPx / 2);
+  const scaleToPage = pdfWidth / (cssWidth * 25.4 / 96);
+  const pageHeightFromCanvas = cssHeight * 25.4 / 96 * scaleToPage;
 
-  while (offsetY < canvas.height) {
-    const sliceHeight = Math.min(pageCanvasHeight, canvas.height - offsetY);
-    const pageCanvas = document.createElement('canvas');
-    pageCanvas.width = canvas.width;
-    pageCanvas.height = sliceHeight;
-
-    const ctx = pageCanvas.getContext('2d');
-    if (!ctx) throw new Error('Could not prepare PDF page.');
-
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-    ctx.drawImage(
-      canvas,
-      0,
-      offsetY,
-      canvas.width,
-      sliceHeight,
-      0,
-      0,
-      canvas.width,
-      sliceHeight,
-    );
-
-    if (pageIndex > 0) pdf.addPage();
-    const pageHeightMm = (sliceHeight * pdfWidth) / canvas.width;
+  if (pageHeightFromCanvas <= pdfHeight + 0.5) {
+    const imageHeightMm = Math.min(pdfHeight, Math.max(1, pageHeightFromCanvas));
     pdf.addImage(
-      pageCanvas.toDataURL('image/jpeg', 0.95),
+      canvas.toDataURL('image/jpeg', 0.95),
       'JPEG',
       0,
       0,
       pdfWidth,
-      pageHeightMm,
+      imageHeightMm,
       undefined,
       'FAST',
     );
+  } else {
+    // Multi-page invoices: crop the source canvas vertically at exact A4 page
+    // boundaries while keeping the same horizontal scale on every page.
+    const pageCanvasHeight = Math.max(
+      1,
+      Math.floor((imageHeightPx * pdfHeight) / pageHeightFromCanvas),
+    );
 
-    offsetY += sliceHeight;
-    pageIndex += 1;
+    let offsetY = 0;
+    let pageIndex = 0;
+    while (offsetY < imageHeightPx) {
+      const sliceHeight = Math.min(pageCanvasHeight, imageHeightPx - offsetY);
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = imageWidthPx;
+      pageCanvas.height = sliceHeight;
+      const ctx = pageCanvas.getContext('2d');
+      if (!ctx) throw new Error('Could not prepare PDF page.');
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      ctx.drawImage(
+        canvas,
+        0,
+        offsetY,
+        imageWidthPx,
+        sliceHeight,
+        0,
+        0,
+        imageWidthPx,
+        sliceHeight,
+      );
+
+      if (pageIndex > 0) pdf.addPage();
+      const sliceHeightMm = (sliceHeight / imageHeightPx) * pageHeightFromCanvas;
+      pdf.addImage(
+        pageCanvas.toDataURL('image/jpeg', 0.95),
+        'JPEG',
+        0,
+        0,
+        pdfWidth,
+        sliceHeightMm,
+        undefined,
+        'FAST',
+      );
+
+      offsetY += sliceHeight;
+      pageIndex += 1;
+    }
   }
 
   pdf.save(getSafeFilename(invoiceNumber));
