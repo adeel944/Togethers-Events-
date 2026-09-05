@@ -3,95 +3,201 @@ import { ChevronLeft, ChevronRight, ArrowRight, Plus, TrendingUp, Wallet, Receip
 import { Booking, BusinessExpense, Client, Invoice, BusinessProfile, NavTab } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
 import { initialBusinessProfile } from '../../services/mockData';
+import { SalesGraph } from './SalesGraph';
 
-interface DashboardViewProps { bookings?: Booking[]; clients?: Client[]; invoices?: Invoice[]; profile?: BusinessProfile; onNavigate: (tab: NavTab) => void; onSelectBooking: (booking: Booking) => void; }
-type ChartPoint = { slot: number; value: number; date: string };
-type ChartSeries = { revenue: ChartPoint[]; vendorPaid: ChartPoint[]; expense: ChartPoint[]; profit: ChartPoint[] };
+interface DashboardViewProps {
+  bookings?: Booking[];
+  clients?: Client[];
+  invoices?: Invoice[];
+  profile?: BusinessProfile;
+  onNavigate: (tab: NavTab) => void;
+  onSelectBooking: (booking: Booking) => void;
+}
+
 const EXPENSE_KEY = 'together-events-business-expenses-v1';
 const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const MAX_SLOTS = 365;
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ bookings: inputBookings = [], clients: inputClients = [], invoices: inputInvoices = [], profile: inputProfile, onNavigate, onSelectBooking }) => {
+export const DashboardView: React.FC<DashboardViewProps> = ({
+  bookings: inputBookings = [],
+  clients: inputClients = [],
+  invoices: inputInvoices = [],
+  profile: inputProfile,
+  onNavigate,
+  onSelectBooking,
+}) => {
   const profile = inputProfile || initialBusinessProfile;
   const bookings = Array.isArray(inputBookings) ? inputBookings : [];
   const clients = Array.isArray(inputClients) ? inputClients : [];
   const invoices = Array.isArray(inputInvoices) ? inputInvoices : [];
   const [calendarDate, setCalendarDate] = useState(new Date());
+
   const money = (n: number) => `${profile.currencySymbol || 'Rs. '}${Number(n || 0).toLocaleString()}`;
-  const normalizeDate = (value: unknown) => { const raw = String(value ?? '').trim(); const match = raw.match(/^(\d{4}-\d{2}-\d{2})/); return match ? match[1] : raw; };
-  const expenses = useMemo<BusinessExpense[]>(() => { try { const raw = localStorage.getItem(EXPENSE_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; } }, []);
-  const getInvoiceAmount = (invoice: Invoice) => { const stored = Number(invoice?.totalAmount || 0); if (stored > 0) return stored; if (invoice?.bookingId) { const booking = bookings.find(item => item.id === invoice.bookingId); if (Number(booking?.totalAmount || 0) > 0) return Number(booking?.totalAmount || 0); } return (invoice?.items || []).reduce((sum, item) => sum + Number(item?.total || Number(item?.quantity || 0) * Number(item?.unitPrice || 0)), 0); };
-  const totalRevenue = invoices.reduce((sum, invoice) => sum + getInvoiceAmount(invoice), 0);
-  const pendingPayments = invoices.reduce((sum, invoice) => sum + Math.max(0, Number(invoice?.remainingBalance || 0) || getInvoiceAmount(invoice) - Number(invoice?.advancePaid || 0)), 0);
-  const vendorPaidTotal = bookings.reduce((sum, b) => sum + (b.assignedVendors || []).reduce((s, v) => s + Number(v.paidAmount || 0), 0), 0);
-  const vendorCommitmentTotal = bookings.reduce((sum, b) => sum + (b.assignedVendors || []).reduce((s, v) => s + Number(v.agreedAmount || 0), 0), 0);
-  const otherExpenseTotal = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-  const netProfit = totalRevenue - vendorPaidTotal - otherExpenseTotal;
-  const confirmedBookings = bookings.filter(b => b?.bookingStatus === 'Confirmed').length;
-  const completedCount = bookings.filter(b => String(b?.bookingStatus).toLowerCase() === 'completed').length;
-  const todayStr = normalizeDate(new Date().toISOString());
-  const upcomingEvents = [...bookings].filter(b => { const date = normalizeDate(b?.eventDate); return date && date >= todayStr && b?.bookingStatus !== 'Cancelled'; }).sort((a,b) => normalizeDate(a.eventDate).localeCompare(normalizeDate(b.eventDate)));
-  const year = calendarDate.getFullYear(); const month = calendarDate.getMonth(); const firstDay = new Date(year, month, 1).getDay(); const days = new Date(year, month + 1, 0).getDate();
-  const getBookingsForDay = (y:number,m:number,d:number) => { const date = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; return bookings.filter(b => normalizeDate(b.eventDate) === date && b.bookingStatus !== 'Cancelled'); };
-  const calendarMonthBookings = useMemo(() => bookings.filter(b => { const date = normalizeDate(b.eventDate); return date.startsWith(`${year}-${String(month + 1).padStart(2, '0')}`) && b.bookingStatus !== 'Cancelled'; }), [bookings, year, month]);
-  const calendarMonthCompleteEvents = useMemo(() => calendarMonthBookings.filter(b => String(b.bookingStatus).toLowerCase() === 'completed').length, [calendarMonthBookings]);
-  const calendarMonthRemainingEvents = useMemo(() => calendarMonthBookings.filter(b => String(b.bookingStatus).toLowerCase() !== 'completed').length, [calendarMonthBookings]);
-
-  const chartSeries = useMemo<ChartSeries>(() => {
-    const slotify = (items: {value:number; date:string}[]) => items.slice(0, MAX_SLOTS).map((item, index) => ({ slot:index + 1, value:item.value, date:item.date }));
-    const revenueItems = bookings.filter(b => b.bookingStatus !== 'Cancelled' && Number(b.totalAmount || 0) > 0).map(b => ({ value:Number(b.totalAmount || 0), date:normalizeDate(b.eventDate) })).sort((a,b) => a.date.localeCompare(b.date));
-    const vendorItems = bookings.flatMap(b => (b.assignedVendors || []).map(v => ({ value:Number(v.paidAmount || 0), date:normalizeDate(v.paymentDate || b.eventDate) }))).filter(p => p.value > 0).sort((a,b) => a.date.localeCompare(b.date));
-    const expenseItems = expenses.filter(e => Number(e.amount || 0) > 0).map(e => ({ value:Number(e.amount || 0), date:normalizeDate(e.date) })).sort((a,b) => a.date.localeCompare(b.date));
-    const revenue = slotify(revenueItems);
-    const vendorPaid = slotify(vendorItems);
-    const expense = slotify(expenseItems);
-    const profitEvents = [...revenueItems.map(p => ({date:p.date, delta:p.value})), ...vendorItems.map(p => ({date:p.date, delta:-p.value})), ...expenseItems.map(p => ({date:p.date, delta:-p.value}))].sort((a,b) => a.date.localeCompare(b.date));
-    let running = 0;
-    const profit = profitEvents.slice(0, MAX_SLOTS).map((event,index) => { running += event.delta; return { slot:index + 1, value:running, date:event.date }; });
-    return { revenue, vendorPaid, expense, profit };
-  }, [bookings, expenses]);
-
-  const chartValues = [...chartSeries.revenue.map(p=>p.value), ...chartSeries.vendorPaid.map(p=>p.value), ...chartSeries.expense.map(p=>p.value), ...chartSeries.profit.map(p=>Math.abs(p.value))];
-  const chartMax = Math.max(1, ...chartValues);
-  const chartScale = (value:number) => 84 - (Math.abs(value) / chartMax) * 68;
-  const chartBaseY = 84;
-  const pointX = (slot:number) => ((Math.max(1, Math.min(MAX_SLOTS, slot)) - 1) / (MAX_SLOTS - 1)) * 100;
-  const smoothPath = (series:ChartPoint[]) => { if (!series.length) return ''; if (series.length === 1) return `M ${pointX(series[0].slot)} ${chartScale(series[0].value)}`; let d=`M ${pointX(series[0].slot)} ${chartScale(series[0].value)}`; for(let i=1;i<series.length;i++){ const a=series[i-1],b=series[i]; const ax=pointX(a.slot),bx=pointX(b.slot),ay=chartScale(a.value),by=chartScale(b.value),dx=(bx-ax)*0.34; d+=` C ${ax+dx} ${ay}, ${bx-dx} ${by}, ${bx} ${by}`; } return d; };
-  const formatAxis = (n:number) => n>=1000000?`${(n/1000000).toFixed(1)}M`:n>=1000?`${Math.round(n/1000)}K`:String(Math.round(n));
-  const ticks = [1,0.75,0.5,0.25,0].map(v => Math.round(chartMax*v));
-  const chartTotals = { revenue:chartSeries.revenue.reduce((s,p)=>s+p.value,0), vendorPaid:chartSeries.vendorPaid.reduce((s,p)=>s+p.value,0), expense:chartSeries.expense.reduce((s,p)=>s+p.value,0), profit:chartSeries.profit.length?chartSeries.profit[chartSeries.profit.length-1].value:0 };
-
-  const renderSeries = (key:keyof ChartSeries, stroke:string, gradientId:string) => {
-    const series = chartSeries[key];
-    if (!series.length) return null;
-    const d = smoothPath(series);
-    const first = series[0];
-    const last = series[series.length - 1];
-    const area = d + ' L ' + pointX(last.slot) + ' 84 L ' + pointX(first.slot) + ' 84 Z';
-    return <g key={key}>
-      <path d={area} fill={'url(#' + gradientId + ')'} stroke="none"/>
-      <path d={d} fill="none" stroke={stroke} strokeOpacity="0.10" strokeWidth="4.8" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d={d} fill="none" stroke={stroke} strokeWidth="1.25" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round"/>
-      {series.map((p,i) => {
-        const cx = pointX(p.slot);
-        const cy = chartScale(p.value);
-        return <g key={String(key) + '-' + i}>
-          <circle cx={cx} cy={cy} r="2.0" fill={'url(#' + gradientId + 'Dot)'} opacity="0.18">
-            <animate attributeName="r" values="1.2;2.8;1.2" dur="2.8s" repeatCount="indefinite" begin={((i%10)*0.13) + 's'}/>
-            <animate attributeName="opacity" values="0.10;0.34;0.10" dur="2.8s" repeatCount="indefinite" begin={((i%10)*0.13) + 's'}/>
-          </circle>
-          <circle cx={cx} cy={cy} r="0.52" fill={stroke} stroke="white" strokeOpacity="0.72" strokeWidth="0.16" vectorEffect="non-scaling-stroke"/>
-        </g>;
-      })}
-    </g>;
+  const normalizeDate = (value: unknown) => {
+    const raw = String(value ?? '').trim();
+    const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : raw;
   };
 
-  return <div className="space-y-6 sm:space-y-7 animate-in fade-in duration-200">
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"><div><div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-slate-900"/><h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-[#0f172a]">Business Performance &amp; Insights</h1></div><p className="text-slate-500 text-xs sm:text-sm font-normal mt-1">Revenue, vendor payments, expenses and profit in one view.</p></div><div className="flex items-center gap-2"><button onClick={()=>onNavigate('invoices')} className="px-3.5 py-2.5 rounded-2xl bg-[#0f172a] text-white text-xs font-medium"><Plus className="w-3.5 h-3.5 inline mr-1"/>New Invoice</button><button onClick={()=>onNavigate('finance')} className="px-3.5 py-2.5 rounded-2xl bg-white/55 backdrop-blur-xl border border-white/80 text-slate-700 text-xs font-medium">Profit &amp; Loss</button></div></div>
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4"><div className="glass-panel p-5"><span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Total Revenue</span><div className="text-2xl sm:text-[26px] font-medium text-[#0f172a] mt-3 truncate">{money(totalRevenue)}</div><p className="text-[11px] text-slate-500 mt-1">From {invoices.length} invoice{invoices.length===1?'':'s'}</p></div><div className="glass-panel p-5"><span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Total Bookings</span><div className="text-2xl sm:text-[26px] font-medium text-[#0f172a] mt-3">{bookings.length}</div><div className="text-[11px] mt-1"><strong>{confirmedBookings}</strong> confirmed · <strong>{completedCount}</strong> completed</div></div><div className="glass-panel p-5"><span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Upcoming Events</span><div className="text-2xl sm:text-[26px] font-medium text-[#0f172a] mt-3">{upcomingEvents.length}</div><p className="text-[11px] text-slate-500 mt-1 truncate">{upcomingEvents[0]?.eventDate?`Next: ${normalizeDate(upcomingEvents[0].eventDate)}`:'No upcoming dates'}</p></div><div className="glass-panel p-5"><span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Total Clients</span><div className="text-2xl sm:text-[26px] font-medium text-[#0f172a] mt-3">{clients.length}</div><p className="text-[11px] text-slate-500 mt-1">Registered accounts &amp; leads</p></div><div className="glass-panel p-5 col-span-2 md:col-span-1"><span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Pending Payments</span><div className="text-2xl sm:text-[26px] font-medium text-amber-600 mt-3 truncate">{money(pendingPayments)}</div><p className="text-[11px] text-slate-500 mt-1">Remaining invoice balance</p></div></div>
-    <div className="grid grid-cols-1 xl:grid-cols-4 gap-6"><div className="xl:col-span-3 glass-panel p-6 sm:p-7"><div className="flex items-center justify-between mb-4"><div><span className="text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">Financial Activity</span><h2 className="text-lg sm:text-xl font-semibold text-[#0f172a] tracking-tight mt-1">365-Point Annual Target</h2></div><span className="text-[8px] uppercase tracking-[0.16em] text-slate-400">1 booking / payment = 1 point</span></div><div className="flex flex-wrap items-center gap-4 mb-3 text-[9px] font-medium"><span className="flex items-center gap-1.5 text-rose-500"><i className="w-2 h-2 rounded-full bg-rose-500"/>Booking Revenue</span><span className="flex items-center gap-1.5 text-amber-600"><i className="w-2 h-2 rounded-full bg-amber-500"/>Vendor Payment</span><span className="flex items-center gap-1.5 text-slate-500"><i className="w-2 h-2 rounded-full bg-slate-500"/>Expense</span><span className="flex items-center gap-1.5 text-emerald-600"><i className="w-2 h-2 rounded-full bg-emerald-600"/>Profit</span></div><div className="relative h-[340px] overflow-hidden rounded-[22px] border border-white/70 bg-white/28 backdrop-blur-xl"><div className="absolute left-3 top-4 bottom-8 w-9 flex flex-col justify-between text-[8px] text-slate-400 text-right tabular-nums pointer-events-none">{ticks.map(t=><span key={t}>{formatAxis(t)}</span>)}</div><svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full"><defs><linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#0f172a" stopOpacity="0.20"/><stop offset="100%" stopColor="#0f172a" stopOpacity="0.012"/></linearGradient><linearGradient id="vendorFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f59e0b" stopOpacity="0.18"/><stop offset="100%" stopColor="#f59e0b" stopOpacity="0.012"/></linearGradient><linearGradient id="expenseFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#64748b" stopOpacity="0.12"/><stop offset="100%" stopColor="#64748b" stopOpacity="0.008"/></linearGradient><linearGradient id="profitFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity="0.18"/><stop offset="100%" stopColor="#10b981" stopOpacity="0.012"/></linearGradient><radialGradient id="revenueFillDot"><stop offset="0%" stopColor="#0f172a" stopOpacity="0.75"/><stop offset="100%" stopColor="#0f172a" stopOpacity="0"/></radialGradient><radialGradient id="vendorFillDot"><stop offset="0%" stopColor="#f59e0b" stopOpacity="0.75"/><stop offset="100%" stopColor="#f59e0b" stopOpacity="0"/></radialGradient><radialGradient id="expenseFillDot"><stop offset="0%" stopColor="#64748b" stopOpacity="0.75"/><stop offset="100%" stopColor="#64748b" stopOpacity="0"/></radialGradient><radialGradient id="profitFillDot"><stop offset="0%" stopColor="#10b981" stopOpacity="0.75"/><stop offset="100%" stopColor="#10b981" stopOpacity="0"/></radialGradient></defs><g stroke="#64748b" strokeOpacity="0.055" strokeWidth="0.16" vectorEffect="non-scaling-stroke">{ticks.map((_,i)=>{const y=16+i*(68/4);return <line key={i} x1="0" y1={y} x2="100" y2={y}/>;})}</g><g opacity="0.30">{Array.from({length:MAX_SLOTS},(_,i)=><line key={"slot-"+i} x1={pointX(i+1)} y1="88" x2={pointX(i+1)} y2="88.7" stroke="#94a3b8" strokeWidth="0.11" vectorEffect="non-scaling-stroke"/>)}</g>{renderSeries('revenue','#0f172a','revenueFill')}{renderSeries('vendorPaid','#f59e0b','vendorFill')}{renderSeries('expense','#64748b','expenseFill')}{renderSeries('profit','#10b981','profitFill')}</svg>{!chartValues.length&&<div className="absolute inset-0 flex items-center justify-center text-xs text-slate-400">No financial activity recorded yet.</div>}</div><div className="mt-2 h-2" aria-hidden="true"/><div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2"><div className="rounded-xl bg-rose-50/70 border border-rose-100 p-2.5"><span className="block text-[8px] uppercase tracking-wider text-rose-500">Revenue</span><span className="block text-sm font-semibold text-rose-600 mt-0.5">{money(chartTotals.revenue)}</span></div><div className="rounded-xl bg-amber-50/70 border border-amber-100 p-2.5"><span className="block text-[8px] uppercase tracking-wider text-amber-600">Vendor Paid</span><span className="block text-sm font-semibold text-amber-700 mt-0.5">{money(chartTotals.vendorPaid)}</span></div><div className="rounded-xl bg-slate-50/80 border border-slate-200 p-2.5"><span className="block text-[8px] uppercase tracking-wider text-slate-500">Expenses</span><span className="block text-sm font-semibold text-slate-700 mt-0.5">{money(chartTotals.expense)}</span></div><div className="rounded-xl bg-emerald-50/70 border border-emerald-100 p-2.5"><span className="block text-[8px] uppercase tracking-wider text-emerald-600">Profit</span><span className="block text-sm font-semibold text-emerald-700 mt-0.5">{money(chartTotals.profit)}</span></div></div></div>
-      <div className="xl:col-span-1 glass-panel p-5 sm:p-6"><div className="flex items-center justify-between mb-5"><div><span className="text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">Events Calendar</span><h2 className="text-lg sm:text-xl font-semibold text-[#0f172a] tracking-tight mt-1">{monthNames[month]} {year}</h2></div><div className="flex items-center gap-1"><button onClick={()=>setCalendarDate(new Date(year,month-1,1))} className="p-2 rounded-xl bg-white/70 border border-white/70 text-slate-500"><ChevronLeft className="w-4 h-4"/></button><button onClick={()=>setCalendarDate(new Date(year,month+1,1))} className="p-2 rounded-xl bg-white/70 border border-white/70 text-slate-500"><ChevronRight className="w-4 h-4"/></button></div></div><div className="grid grid-cols-7 gap-1.5 text-center mb-2 text-[10px] font-medium text-slate-400">{['Su','Mo','Tu','We','Th','Fr','Sa'].map(d=><div key={d}>{d}</div>)}</div><div className="grid grid-cols-7 gap-1.5 text-center text-xs">{Array.from({length:firstDay}).map((_,i)=><div key={`e${i}`} className="py-2"/>)}{Array.from({length:days}).map((_,i)=>{const d=i+1;const db=getBookingsForDay(year,month,d);const completed=db.some(b=>String(b.bookingStatus).toLowerCase()==='completed');const today=d===new Date().getDate()&&month===new Date().getMonth()&&year===new Date().getFullYear();const cls=completed?'bg-red-500 text-white':db.length?'bg-[#0f172a] text-white':today?'border border-[#0f172a] text-[#0f172a] bg-white/40':'text-slate-700 hover:bg-white/45';return <button key={d} onClick={()=>db[0]&&onSelectBooking(db[0])} className={`min-h-10 py-2 rounded-xl font-medium ${cls}`}>{d}</button>;})}</div><div className="mt-6 pt-4 border-t border-white/60 grid grid-cols-3 gap-3"><div className="glass-card-subtle p-3"><span className="block text-[9px] uppercase tracking-widest text-slate-400">Total Booking</span><span className="block text-sm font-medium mt-1">{calendarMonthBookings.length}</span></div><div className="glass-card-subtle p-3"><span className="block text-[9px] uppercase tracking-widest text-slate-400">Complete Event</span><span className="block text-sm font-medium mt-1">{calendarMonthCompleteEvents}</span></div><div className="glass-card-subtle p-3"><span className="block text-[9px] uppercase tracking-widest text-slate-400">Remaining Event</span><span className="block text-sm font-medium text-amber-700 mt-1">{calendarMonthRemainingEvents}</span></div></div></div></div>
+  const expenses = useMemo<BusinessExpense[]>(() => {
+    try {
+      const raw = localStorage.getItem(EXPENSE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }, []);
 
-    <div className="grid grid-cols-1 xl:grid-cols-5 gap-6"><div className="xl:col-span-2 glass-panel p-6 sm:p-7"><div className="flex items-center justify-between mb-5"><div><span className="text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">Upcoming Schedule</span><h2 className="text-lg font-semibold text-[#0f172a] mt-1">Next Events</h2></div><button onClick={()=>onNavigate('bookings')} className="text-xs font-medium text-slate-500 flex items-center gap-1">View All <ArrowRight className="w-3.5 h-3.5"/></button></div>{upcomingEvents.length===0?<div className="py-14 text-center text-slate-400 text-sm">No upcoming events recorded yet.</div>:<div className="space-y-2.5 max-h-[390px] overflow-y-auto pr-1">{upcomingEvents.map(b=><button key={b.id} onClick={()=>onSelectBooking(b)} className="w-full text-left flex items-center justify-between gap-3 p-3 rounded-2xl bg-white/45 border border-white/65"><div className="min-w-0"><p className="font-medium text-sm text-[#0f172a] truncate">{b.clientName}</p><p className="text-[11px] text-slate-500 mt-0.5 truncate">{b.eventType} • {normalizeDate(b.eventDate)}</p></div><div className="text-right shrink-0"><p className="font-medium text-xs text-[#0f172a]">{money(b.totalAmount)}</p><div className="mt-1"><StatusBadge status={b.bookingStatus}/></div></div></button>)}</div>}</div><div className="xl:col-span-3 glass-panel p-6 sm:p-8"><div className="flex items-center justify-between mb-5"><div><h3 className="text-base font-semibold text-[#0f172a]">Financial Snapshot</h3><p className="text-xs text-slate-500 mt-0.5">Live totals from bookings, invoices, vendors and expenses</p></div><button onClick={()=>onNavigate('finance')} className="text-xs font-medium text-slate-500 flex items-center gap-1">Open Finance <ArrowRight className="w-3.5 h-3.5"/></button></div><div className="grid grid-cols-1 sm:grid-cols-3 gap-3"><div className="rounded-2xl bg-white/50 border border-white/70 p-4"><Wallet className="w-4 h-4 text-amber-600"/><span className="block text-[9px] uppercase tracking-widest text-slate-400 mt-3">Vendor Paid</span><span className="block text-lg font-medium mt-1">{money(vendorPaidTotal)}</span></div><div className="rounded-2xl bg-white/50 border border-white/70 p-4"><ReceiptText className="w-4 h-4 text-slate-500"/><span className="block text-[9px] uppercase tracking-widest text-slate-400 mt-3">Other Expenses</span><span className="block text-lg font-medium mt-1">{money(otherExpenseTotal)}</span></div><div className="rounded-2xl bg-white/50 border border-white/70 p-4"><TrendingUp className="w-4 h-4 text-emerald-600"/><span className="block text-[9px] uppercase tracking-widest text-slate-400 mt-3">Net Profit</span><span className={`block text-lg font-medium mt-1 ${netProfit>=0?'text-emerald-700':'text-red-600'}`}>{money(netProfit)}</span></div></div><div className="mt-5 overflow-x-auto"><table className="w-full text-left"><thead className="text-[10px] uppercase tracking-widest text-slate-400 font-medium"><tr><th className="pb-2">Metric</th><th className="pb-2 text-right">Amount</th><th className="pb-2 text-right">Meaning</th></tr></thead><tbody className="text-xs divide-y divide-white/50"><tr><td className="py-2.5">Revenue</td><td className="py-2.5 text-right font-medium">{money(totalRevenue)}</td><td className="py-2.5 text-right text-slate-500">Invoice total</td></tr><tr><td className="py-2.5">Vendor commitment</td><td className="py-2.5 text-right font-medium">{money(vendorCommitmentTotal)}</td><td className="py-2.5 text-right text-slate-500">Agreed vendor cost</td></tr><tr><td className="py-2.5">Vendor paid</td><td className="py-2.5 text-right font-medium text-amber-700">{money(vendorPaidTotal)}</td><td className="py-2.5 text-right text-slate-500">Actual vendor cash paid</td></tr><tr><td className="py-2.5">Other expenses</td><td className="py-2.5 text-right font-medium">{money(otherExpenseTotal)}</td><td className="py-2.5 text-right text-slate-500">Manual business expenses</td></tr><tr><td className="py-2.5 font-semibold">Net profit</td><td className={`py-2.5 text-right font-semibold ${netProfit>=0?'text-emerald-700':'text-red-600'}`}>{money(netProfit)}</td><td className="py-2.5 text-right text-slate-500">Revenue − paid vendors − expenses</td></tr></tbody></table></div></div></div>
-  </div>;
+  const getInvoiceAmount = (invoice: Invoice) => {
+    const stored = Number(invoice?.totalAmount || 0);
+    if (stored > 0) return stored;
+    if (invoice?.bookingId) {
+      const booking = bookings.find((item) => item.id === invoice.bookingId);
+      if (Number(booking?.totalAmount || 0) > 0) return Number(booking?.totalAmount || 0);
+    }
+    return (invoice?.items || []).reduce(
+      (sum, item) => sum + Number(item?.total || Number(item?.quantity || 0) * Number(item?.unitPrice || 0)),
+      0,
+    );
+  };
+
+  const totalRevenue = invoices.reduce((sum, invoice) => sum + getInvoiceAmount(invoice), 0);
+  const pendingPayments = invoices.reduce(
+    (sum, invoice) => sum + Math.max(0, Number(invoice?.remainingBalance || 0) || getInvoiceAmount(invoice) - Number(invoice?.advancePaid || 0)),
+    0,
+  );
+  const vendorPaidTotal = bookings.reduce(
+    (sum, booking) => sum + (booking.assignedVendors || []).reduce((inner, vendor) => inner + Number(vendor.paidAmount || 0), 0),
+    0,
+  );
+  const vendorCommitmentTotal = bookings.reduce(
+    (sum, booking) => sum + (booking.assignedVendors || []).reduce((inner, vendor) => inner + Number(vendor.agreedAmount || 0), 0),
+    0,
+  );
+  const otherExpenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const netProfit = totalRevenue - vendorPaidTotal - otherExpenseTotal;
+  const confirmedBookings = bookings.filter((booking) => booking?.bookingStatus === 'Confirmed').length;
+  const completedCount = bookings.filter((booking) => String(booking?.bookingStatus).toLowerCase() === 'completed').length;
+  const todayStr = normalizeDate(new Date().toISOString());
+
+  const upcomingEvents = useMemo(
+    () => [...bookings]
+      .filter((booking) => {
+        const date = normalizeDate(booking?.eventDate);
+        return date && date >= todayStr && booking?.bookingStatus !== 'Cancelled';
+      })
+      .sort((a, b) => normalizeDate(a.eventDate).localeCompare(normalizeDate(b.eventDate))),
+    [bookings, todayStr],
+  );
+
+  const recentBookings = useMemo(
+    () => [...bookings].filter(Boolean).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5),
+    [bookings],
+  );
+
+  const year = calendarDate.getFullYear();
+  const month = calendarDate.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const days = new Date(year, month + 1, 0).getDate();
+
+  const getBookingsForDay = (y: number, m: number, d: number) => {
+    const date = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    return bookings.filter((booking) => normalizeDate(booking.eventDate) === date && booking.bookingStatus !== 'Cancelled');
+  };
+
+  const calendarMonthBookings = useMemo(
+    () => bookings.filter((booking) => {
+      const date = normalizeDate(booking.eventDate);
+      return date.startsWith(`${year}-${String(month + 1).padStart(2, '0')}`) && booking.bookingStatus !== 'Cancelled';
+    }),
+    [bookings, year, month],
+  );
+  const calendarMonthCompleteEvents = calendarMonthBookings.filter((booking) => String(booking.bookingStatus).toLowerCase() === 'completed').length;
+  const calendarMonthRemainingEvents = calendarMonthBookings.length - calendarMonthCompleteEvents;
+
+  return (
+    <div className="space-y-6 sm:space-y-7 animate-in fade-in duration-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-slate-900" />
+            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-[#0f172a]">Business Performance &amp; Insights</h1>
+          </div>
+          <p className="text-slate-500 text-xs sm:text-sm font-normal mt-1">Revenue, vendor payments, expenses and profit in one view.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => onNavigate('invoices')} className="px-3.5 py-2.5 rounded-2xl bg-[#0f172a] text-white text-xs font-medium">
+            <Plus className="w-3.5 h-3.5 inline mr-1" />New Invoice
+          </button>
+          <button type="button" onClick={() => onNavigate('finance')} className="px-3.5 py-2.5 rounded-2xl bg-white/55 backdrop-blur-xl border border-white/80 text-slate-700 text-xs font-medium">Profit &amp; Loss</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4">
+        <div className="glass-panel p-5"><span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Total Revenue</span><div className="text-2xl sm:text-[26px] font-medium text-[#0f172a] mt-3 truncate">{money(totalRevenue)}</div><p className="text-[11px] text-slate-500 mt-1">From {invoices.length} invoice{invoices.length === 1 ? '' : 's'}</p></div>
+        <div className="glass-panel p-5"><span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Total Bookings</span><div className="text-2xl sm:text-[26px] font-medium text-[#0f172a] mt-3">{bookings.length}</div><div className="text-[11px] mt-1"><strong>{confirmedBookings}</strong> confirmed · <strong>{completedCount}</strong> completed</div></div>
+        <div className="glass-panel p-5"><span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Upcoming Events</span><div className="text-2xl sm:text-[26px] font-medium text-[#0f172a] mt-3">{upcomingEvents.length}</div><p className="text-[11px] text-slate-500 mt-1 truncate">{upcomingEvents[0]?.eventDate ? `Next: ${normalizeDate(upcomingEvents[0].eventDate)}` : 'No upcoming dates'}</p></div>
+        <div className="glass-panel p-5"><span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Total Clients</span><div className="text-2xl sm:text-[26px] font-medium text-[#0f172a] mt-3">{clients.length}</div><p className="text-[11px] text-slate-500 mt-1">Registered accounts &amp; leads</p></div>
+        <div className="glass-panel p-5 col-span-2 md:col-span-1"><span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Pending Payments</span><div className="text-2xl sm:text-[26px] font-medium text-amber-600 mt-3 truncate">{money(pendingPayments)}</div><p className="text-[11px] text-slate-500 mt-1">Remaining invoice balance</p></div>
+      </div>
+
+      <SalesGraph bookings={bookings} currencySymbol={profile.currencySymbol || 'Rs. '} />
+
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+        <div className="xl:col-span-3 glass-panel p-6 sm:p-7">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">Events Calendar</span>
+              <h2 className="text-lg sm:text-xl font-semibold text-[#0f172a] tracking-tight mt-1">{monthNames[month]} {year}</h2>
+            </div>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => setCalendarDate(new Date(year, month - 1, 1))} className="p-2 rounded-xl bg-white/70 border border-white/70 text-slate-500"><ChevronLeft className="w-4 h-4" /></button>
+              <button type="button" onClick={() => setCalendarDate(new Date(year, month + 1, 1))} className="p-2 rounded-xl bg-white/70 border border-white/70 text-slate-500"><ChevronRight className="w-4 h-4" /></button>
+            </div>
+          </div>
+          <div className="grid grid-cols-7 gap-1.5 text-center mb-2 text-[10px] font-medium text-slate-400">{['Su','Mo','Tu','We','Th','Fr','Sa'].map((day) => <div key={day}>{day}</div>)}</div>
+          <div className="grid grid-cols-7 gap-1.5 text-center text-xs">
+            {Array.from({ length: firstDay }).map((_, i) => <div key={`empty-${i}`} className="py-2" />)}
+            {Array.from({ length: days }).map((_, i) => {
+              const d = i + 1;
+              const dayBookings = getBookingsForDay(year, month, d);
+              const completed = dayBookings.some((booking) => String(booking.bookingStatus).toLowerCase() === 'completed');
+              const today = d === new Date().getDate() && month === new Date().getMonth() && year === new Date().getFullYear();
+              const cls = completed ? 'bg-red-500 text-white' : dayBookings.length ? 'bg-[#0f172a] text-white' : today ? 'border border-[#0f172a] text-[#0f172a] bg-white/40' : 'text-slate-700 hover:bg-white/45';
+              return <button type="button" key={d} onClick={() => dayBookings[0] && onSelectBooking(dayBookings[0])} className={`min-h-10 py-2 rounded-xl font-medium ${cls}`}>{d}</button>;
+            })}
+          </div>
+          <div className="mt-6 pt-4 border-t border-white/60 grid grid-cols-3 gap-3">
+            <div className="glass-card-subtle p-3"><span className="block text-[9px] uppercase tracking-widest text-slate-400">Total Booking</span><span className="block text-sm font-medium mt-1">{calendarMonthBookings.length}</span></div>
+            <div className="glass-card-subtle p-3"><span className="block text-[9px] uppercase tracking-widest text-slate-400">Complete Event</span><span className="block text-sm font-medium mt-1">{calendarMonthCompleteEvents}</span></div>
+            <div className="glass-card-subtle p-3"><span className="block text-[9px] uppercase tracking-widest text-slate-400">Remaining Event</span><span className="block text-sm font-medium text-amber-700 mt-1">{calendarMonthRemainingEvents}</span></div>
+          </div>
+        </div>
+
+        <div className="xl:col-span-2 glass-panel p-6 sm:p-7">
+          <div className="flex items-center justify-between mb-5">
+            <div><span className="text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">Upcoming Schedule</span><h2 className="text-lg font-semibold text-[#0f172a] mt-1">Next Events</h2></div>
+            <button type="button" onClick={() => onNavigate('bookings')} className="text-xs font-medium text-slate-500 flex items-center gap-1">View All <ArrowRight className="w-3.5 h-3.5" /></button>
+          </div>
+          {upcomingEvents.length === 0 ? <div className="py-14 text-center text-slate-400 text-sm">No upcoming events recorded yet.</div> : <div className="space-y-2.5 max-h-[390px] overflow-y-auto pr-1">{upcomingEvents.map((booking) => <button type="button" key={booking.id} onClick={() => onSelectBooking(booking)} className="w-full text-left flex items-center justify-between gap-3 p-3 rounded-2xl bg-white/45 border border-white/65"><div className="min-w-0"><p className="font-medium text-sm text-[#0f172a] truncate">{booking.clientName}</p><p className="text-[11px] text-slate-500 mt-0.5 truncate">{booking.eventType} • {normalizeDate(booking.eventDate)}</p></div><div className="text-right shrink-0"><p className="font-medium text-xs text-[#0f172a]">{money(booking.totalAmount)}</p><div className="mt-1"><StatusBadge status={booking.bookingStatus} /></div></div></button>)}</div>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+        <div className="xl:col-span-2 glass-panel p-6 sm:p-7">
+          <div className="flex items-center justify-between mb-5"><div><span className="text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">Recent Activity</span><h2 className="text-lg font-semibold text-[#0f172a] mt-1">Recent Client Bookings</h2></div><button type="button" onClick={() => onNavigate('bookings')} className="text-xs font-medium text-slate-500 flex items-center gap-1">All Bookings <ArrowRight className="w-3.5 h-3.5" /></button></div>
+          {recentBookings.length === 0 ? <div className="py-10 text-center text-slate-400 text-sm">No bookings recorded yet.</div> : <div className="space-y-2.5">{recentBookings.map((booking) => <button type="button" key={booking.id} onClick={() => onSelectBooking(booking)} className="w-full flex items-center justify-between gap-3 p-3 rounded-2xl bg-white/45 border border-white/65 text-left"><div className="min-w-0"><p className="font-medium text-sm text-[#0f172a] truncate">{booking.clientName}</p><p className="text-[11px] text-slate-500 mt-0.5">{booking.eventType} • {normalizeDate(booking.eventDate)}</p></div><StatusBadge status={booking.bookingStatus} /></button>)}</div>}
+        </div>
+
+        <div className="xl:col-span-3 glass-panel p-6 sm:p-8">
+          <div className="flex items-center justify-between mb-5"><div><h3 className="text-base font-semibold text-[#0f172a]">Financial Snapshot</h3><p className="text-xs text-slate-500 mt-0.5">Live totals from bookings, invoices, vendors and expenses</p></div><button type="button" onClick={() => onNavigate('finance')} className="text-xs font-medium text-slate-500 flex items-center gap-1">Open Finance <ArrowRight className="w-3.5 h-3.5" /></button></div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-2xl bg-white/50 border border-white/70 p-4"><Wallet className="w-4 h-4 text-amber-600" /><span className="block text-[9px] uppercase tracking-widest text-slate-400 mt-3">Vendor Paid</span><span className="block text-lg font-medium mt-1">{money(vendorPaidTotal)}</span></div>
+            <div className="rounded-2xl bg-white/50 border border-white/70 p-4"><ReceiptText className="w-4 h-4 text-slate-500" /><span className="block text-[9px] uppercase tracking-widest text-slate-400 mt-3">Other Expenses</span><span className="block text-lg font-medium mt-1">{money(otherExpenseTotal)}</span></div>
+            <div className="rounded-2xl bg-white/50 border border-white/70 p-4"><TrendingUp className="w-4 h-4 text-emerald-600" /><span className="block text-[9px] uppercase tracking-widest text-slate-400 mt-3">Net Profit</span><span className={`block text-lg font-medium mt-1 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{money(netProfit)}</span></div>
+          </div>
+          <div className="mt-5 overflow-x-auto"><table className="w-full text-left"><thead className="text-[10px] uppercase tracking-widest text-slate-400 font-medium"><tr><th className="pb-2">Metric</th><th className="pb-2 text-right">Amount</th><th className="pb-2 text-right">Meaning</th></tr></thead><tbody className="text-xs divide-y divide-white/50"><tr><td className="py-2.5">Revenue</td><td className="py-2.5 text-right font-medium">{money(totalRevenue)}</td><td className="py-2.5 text-right text-slate-500">Invoice total</td></tr><tr><td className="py-2.5">Vendor commitment</td><td className="py-2.5 text-right font-medium">{money(vendorCommitmentTotal)}</td><td className="py-2.5 text-right text-slate-500">Agreed vendor cost</td></tr><tr><td className="py-2.5">Vendor paid</td><td className="py-2.5 text-right font-medium text-amber-700">{money(vendorPaidTotal)}</td><td className="py-2.5 text-right text-slate-500">Actual vendor cash paid</td></tr><tr><td className="py-2.5">Other expenses</td><td className="py-2.5 text-right font-medium">{money(otherExpenseTotal)}</td><td className="py-2.5 text-right text-slate-500">Manual business expenses</td></tr><tr><td className="py-2.5 font-semibold">Net profit</td><td className={`py-2.5 text-right font-semibold ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{money(netProfit)}</td><td className="py-2.5 text-right text-slate-500">Revenue − paid vendors − expenses</td></tr></tbody></table></div>
+        </div>
+      </div>
+    </div>
+  );
 };
