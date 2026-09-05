@@ -18,14 +18,20 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   const invoiceSheet = source.querySelector<HTMLElement>('.print-container') || source;
   await waitForInvoiceAssets(invoiceSheet);
 
-  // Use the browser's native print engine instead of html2canvas/jsPDF.
-  // This preserves the exact CSS layout shown in the invoice preview and
-  // avoids unsupported oklab()/oklch() parsing entirely.
-  const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=900,height=1100');
+  // Browser-native printing is used instead of html2canvas/jsPDF. This keeps the
+  // invoice's real CSS layout intact and avoids html2canvas's unsupported
+  // oklab()/oklch() parser entirely.
+  const printWindow = window.open('', '_blank', 'width=900,height=1100');
   if (!printWindow) throw new Error('Please allow pop-ups for this site to save the invoice as PDF.');
 
   const doc = printWindow.document;
   const title = `Invoice-${String(invoiceNumber || 'invoice').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'invoice'}`;
+
+  // Carry over the app's actual stylesheets (including Tailwind) so every class
+  // used by InvoiceDocument renders exactly as it does in the live preview.
+  const stylesheetHtml = Array.from(document.head.querySelectorAll('style, link[rel="stylesheet"]'))
+    .map((node) => node.outerHTML)
+    .join('\n');
 
   doc.open();
   doc.write(`<!doctype html>
@@ -33,15 +39,19 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
 <head>
   <meta charset="utf-8" />
   <title>${title}</title>
+  ${stylesheetHtml}
   <style>
     @page { size: A4 portrait; margin: 0; }
-    html, body { margin: 0; padding: 0; background: #fff; }
-    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+    body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     .pdf-page { width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; box-sizing: border-box; }
+    .pdf-page > .print-container { width: 100% !important; max-width: none !important; min-height: 0 !important; margin: 0 !important; box-sizing: border-box !important; }
     .pdf-page img { max-width: 100%; }
+    .no-print { display: none !important; }
     @media print {
       html, body { width: 210mm; }
       .pdf-page { width: 210mm; min-height: 297mm; }
+      .pdf-page > .print-container { break-inside: avoid; }
     }
   </style>
 </head>
@@ -71,8 +81,8 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   printWindow.focus();
   window.setTimeout(() => {
     printWindow.print();
-    window.setTimeout(() => printWindow.close(), 1000);
-  }, 100);
+    window.setTimeout(() => printWindow.close(), 1500);
+  }, 200);
 };
 
 export const generateWhatsAppUrl = (invoice: Invoice, profile: BusinessProfile): string => {
