@@ -39,27 +39,25 @@ async function getBusinessId(): Promise<string> {
 function mapProfile(row: any): BusinessProfile {
   const localAssets = getLocalAssets();
   return {
-    businessName: row.business_name || '', tagline: row.tagline || '', ownerName: row.owner_name || '',
-    phone: row.phone || '', whatsApp: row.whatsapp || '', email: row.email || '', website: row.website || '',
-    address: row.address || '', city: row.city || '', country: row.country || '',
+    businessName: row.business_name || '', tagline: row.tagline || '', ownerName: row.owner_name || '', phone: row.phone || '',
+    whatsApp: row.whatsapp || '', email: row.email || '', website: row.website || '', address: row.address || '', city: row.city || '', country: row.country || '',
     taxNumber: row.tax_number || undefined, registrationNumber: row.registration_number || undefined,
-    logoUrl: row.logo_url || localAssets.logoUrl || undefined,
-    signatureUrl: row.signature_url || localAssets.signatureUrl || undefined,
-    invoiceFooterText: row.invoice_footer_text || '', defaultTerms: row.default_terms || '',
-    defaultCurrency: 'PKR', currency: 'PKR', currencySymbol: 'Rs. ',
+    logoUrl: row.logo_url || localAssets.logoUrl || undefined, signatureUrl: row.signature_url || localAssets.signatureUrl || undefined,
+    invoiceFooterText: row.invoice_footer_text || '', defaultTerms: row.default_terms || '', defaultCurrency: 'PKR', currency: 'PKR', currencySymbol: 'Rs. ',
     invoicePrefix: row.invoice_prefix || 'TE-', invoiceStartingNumber: Number(row.invoice_starting_number || 1001),
     bankDetails: row.bank_details || { bankName: '', accountTitle: '', accountNumber: '', iban: '' },
   };
 }
 
 function mapInvoiceSettings(row: any): InvoiceSettings {
+  const customLayout = row.custom_layout && typeof row.custom_layout === 'object' ? row.custom_layout : {};
   return {
     documentTitle: row.document_title || 'BOOKING CONFIRMATION', defaultTemplate: row.default_template || 'modern',
-    showLogo: row.show_logo ?? true, showSignature: row.show_signature ?? true,
-    showBusinessAddress: row.show_business_address ?? true, showBillingAddress: row.show_billing_address ?? true,
-    showContactInfo: row.show_contact_info ?? true, showPhone: row.show_phone ?? true, showEmail: row.show_email ?? true,
-    fontSize: row.font_size || 'medium', bodySize: row.body_size || 'medium', headingSize: row.heading_size || 'large',
-    dateFormat: row.date_format || 'DD/MM/YYYY',
+    showLogo: row.show_logo ?? true, showSignature: row.show_signature ?? true, showBusinessAddress: row.show_business_address ?? true,
+    showBillingAddress: row.show_billing_address ?? true, showContactInfo: row.show_contact_info ?? true, showPhone: row.show_phone ?? true, showEmail: row.show_email ?? true,
+    fontSize: row.font_size || 'medium', bodySize: row.body_size || 'medium', headingSize: row.heading_size || 'large', dateFormat: row.date_format || 'DD/MM/YYYY',
+    whatsappMessageTemplate: typeof customLayout.whatsappMessageTemplate === 'string' ? customLayout.whatsappMessageTemplate : initialInvoiceSettings.whatsappMessageTemplate,
+    emailMessageTemplate: typeof customLayout.emailMessageTemplate === 'string' ? customLayout.emailMessageTemplate : initialInvoiceSettings.emailMessageTemplate,
   };
 }
 
@@ -75,21 +73,11 @@ export const businessService = {
     const businessId = await getBusinessId();
     const dbUpdates: Record<string, any> = {};
     const fields: Record<string, string> = {
-      businessName: 'business_name', tagline: 'tagline', ownerName: 'owner_name', phone: 'phone', whatsApp: 'whatsapp',
-      email: 'email', website: 'website', address: 'address', city: 'city', country: 'country', taxNumber: 'tax_number',
-      registrationNumber: 'registration_number', logoUrl: 'logo_url', signatureUrl: 'signature_url', invoiceFooterText: 'invoice_footer_text',
-      defaultTerms: 'default_terms', invoicePrefix: 'invoice_prefix', invoiceStartingNumber: 'invoice_starting_number', bankDetails: 'bank_details',
+      businessName: 'business_name', tagline: 'tagline', ownerName: 'owner_name', phone: 'phone', whatsApp: 'whatsapp', email: 'email', website: 'website', address: 'address', city: 'city', country: 'country', taxNumber: 'tax_number', registrationNumber: 'registration_number', logoUrl: 'logo_url', signatureUrl: 'signature_url', invoiceFooterText: 'invoice_footer_text', defaultTerms: 'default_terms', invoicePrefix: 'invoice_prefix', invoiceStartingNumber: 'invoice_starting_number', bankDetails: 'bank_details',
     };
     for (const [key, column] of Object.entries(fields)) if ((updates as any)[key] !== undefined) dbUpdates[column] = (updates as any)[key];
-    dbUpdates.default_currency = 'PKR';
-    dbUpdates.currency = 'PKR';
-    dbUpdates.currency_symbol = 'Rs. ';
-
-    // Keep logo/signature available immediately even if an older database row cannot store the image payload.
-    if ((updates as any).logoUrl !== undefined || (updates as any).signatureUrl !== undefined) {
-      saveLocalAssets({ logoUrl: (updates as any).logoUrl, signatureUrl: (updates as any).signatureUrl });
-    }
-
+    dbUpdates.default_currency = 'PKR'; dbUpdates.currency = 'PKR'; dbUpdates.currency_symbol = 'Rs. ';
+    if ((updates as any).logoUrl !== undefined || (updates as any).signatureUrl !== undefined) saveLocalAssets({ logoUrl: (updates as any).logoUrl, signatureUrl: (updates as any).signatureUrl });
     const { data, error } = await supabase.from('businesses').update(dbUpdates).eq('id', businessId).select('*').single();
     if (error) throw new Error(error.message);
     const updated = mapProfile(data);
@@ -110,13 +98,24 @@ export const businessService = {
     const businessId = await getBusinessId();
     const dbUpdates: Record<string, any> = {};
     const fields: Record<string, string> = {
-      documentTitle: 'document_title', defaultTemplate: 'default_template', showLogo: 'show_logo', showSignature: 'show_signature',
-      showBusinessAddress: 'show_business_address', showBillingAddress: 'show_billing_address', showContactInfo: 'show_contact_info',
-      showPhone: 'show_phone', showEmail: 'show_email', fontSize: 'font_size', bodySize: 'body_size', headingSize: 'heading_size', dateFormat: 'date_format',
+      documentTitle: 'document_title', defaultTemplate: 'default_template', showLogo: 'show_logo', showSignature: 'show_signature', showBusinessAddress: 'show_business_address', showBillingAddress: 'show_billing_address', showContactInfo: 'show_contact_info', showPhone: 'show_phone', showEmail: 'show_email', fontSize: 'font_size', bodySize: 'body_size', headingSize: 'heading_size', dateFormat: 'date_format',
     };
     for (const [key, column] of Object.entries(fields)) if ((updates as any)[key] !== undefined) dbUpdates[column] = (updates as any)[key];
-    const { data: existing, error: existingError } = await supabase.from('invoice_settings').select('id').eq('business_id', businessId).limit(1).maybeSingle();
+
+    const { data: existing, error: existingError } = await supabase.from('invoice_settings').select('id,custom_layout').eq('business_id', businessId).limit(1).maybeSingle();
     if (existingError) throw new Error(existingError.message);
+
+    const existingCustomLayout = existing?.custom_layout && typeof existing.custom_layout === 'object' ? existing.custom_layout : {};
+    const hasWhatsAppTemplate = (updates as any).whatsappMessageTemplate !== undefined;
+    const hasEmailTemplate = (updates as any).emailMessageTemplate !== undefined;
+    if (hasWhatsAppTemplate || hasEmailTemplate) {
+      dbUpdates.custom_layout = {
+        ...existingCustomLayout,
+        ...(hasWhatsAppTemplate ? { whatsappMessageTemplate: (updates as any).whatsappMessageTemplate } : {}),
+        ...(hasEmailTemplate ? { emailMessageTemplate: (updates as any).emailMessageTemplate } : {}),
+      };
+    }
+
     let data: any; let error: any;
     if (existing?.id) {
       const result = await supabase.from('invoice_settings').update(dbUpdates).eq('id', existing.id).select('*').single(); data = result.data; error = result.error;
