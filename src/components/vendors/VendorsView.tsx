@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, Search, Building2, Edit2, Banknote, WalletCards, Trash, CheckCircle2 } from 'lucide-react';
-import { Vendor, VendorCategory, Booking, BusinessProfile, Invoice } from '../../types';
+import { Vendor, VendorCategory, Booking, BusinessProfile, Invoice, BookingVendor } from '../../types';
 import { Modal } from '../common/Modal';
 import { EmptyState } from '../common/EmptyState';
 import { initialBusinessProfile } from '../../services/mockData';
@@ -11,7 +11,7 @@ const CATEGORIES:VendorCategory[]=['Decorator','Caterer','Photographer','Videogr
 const KEY='together-events-vendor-payments-v1';
 const loadPayments=():VendorPayment[]=>{try{const raw=localStorage.getItem(KEY);const data=raw?JSON.parse(raw):[];return Array.isArray(data)?data.map((p:any)=>({...p,invoiceId:p.invoiceId||'',eventLabel:p.eventLabel||'Vendor payment',amount:Number(p.amount||0),totalAmount:Number(p.totalAmount||p.amount||0)})):[]}catch{return[]}};
 
-export const VendorsView:React.FC<VendorsViewProps>=({vendors:inputVendors=[],bookings:inputBookings=[],invoices:inputInvoices=[],profile:inputProfile,onCreateVendor,onUpdateVendor,onDeleteVendor,onSelectBooking})=>{
+export const VendorsView:React.FC<VendorsViewProps>=({vendors:inputVendors=[],bookings:inputBookings=[],invoices:inputInvoices=[],profile:inputProfile,onCreateVendor,onUpdateVendor,onDeleteVendor,onSelectBooking,onUpdateBooking})=>{
  const profile=inputProfile||initialBusinessProfile;
  const vendors=Array.isArray(inputVendors)?inputVendors:[];
  const bookings=Array.isArray(inputBookings)?inputBookings:[];
@@ -43,25 +43,32 @@ export const VendorsView:React.FC<VendorsViewProps>=({vendors:inputVendors=[],bo
  const eventRemaining=Math.max(0,eventTotal-eventPaid);
  const amount=Number(form.paidAmount||0);
 
- const save=(e:React.FormEvent<HTMLFormElement>)=>{
+ const save=async(e:React.FormEvent<HTMLFormElement>)=>{
    e.preventDefault();
    if(!paymentVendor || !form.invoiceId || eventTotal<=0 || amount<=0 || amount>eventRemaining) return;
-   const p:VendorPayment={
-     id:`vp-${Date.now()}`,
-     vendorId:paymentVendor.id,
-     invoiceId:form.invoiceId,
-     eventLabel,
-     amount,
-     totalAmount:eventTotal,
-     date:form.date,
-     method:form.method,
-     notes:form.notes.trim(),
-     createdAt:new Date().toISOString()
-   };
-   const next=[p,...payments];
-   setPayments(next);
-   localStorage.setItem(KEY,JSON.stringify(next));
-   setPaymentOpen(false);
+   try{
+     const p:VendorPayment={id:`vp-${Date.now()}`,vendorId:paymentVendor.id,invoiceId:form.invoiceId,eventLabel,amount,totalAmount:eventTotal,date:form.date,method:form.method,notes:form.notes.trim(),createdAt:new Date().toISOString()};
+     const next=[p,...payments];
+     setPayments(next);
+     localStorage.setItem(KEY,JSON.stringify(next));
+
+     // Persist the payment against the booking so Dashboard, Finance/P&L and charts all read the same source of truth.
+     if(invoiceBooking && onUpdateBooking){
+       const currentAssignments=invoiceBooking.assignedVendors||[];
+       const existing=currentAssignments.find(v=>v.vendorId===paymentVendor.id);
+       const priorPaid=eventPayments.reduce((s,x)=>s+Number(x.amount||0),0);
+       const newPaid=Math.min(eventTotal, priorPaid+amount);
+       const updatedVendor:BookingVendor=existing?{...existing,agreedAmount:Math.max(Number(existing.agreedAmount||0),eventTotal),paidAmount:newPaid,paymentStatus:newPaid>=Math.max(Number(existing.agreedAmount||0),eventTotal)?'Paid':newPaid>0?'Partial':'Pending',paymentDate:form.date,paymentMethod:form.method,paymentNotes:form.notes.trim()}:{id:`bv-${Date.now()}`,vendorId:paymentVendor.id,vendorName:paymentVendor.vendorName,category:paymentVendor.category,agreedAmount:eventTotal,paidAmount:newPaid,paymentStatus:newPaid>=eventTotal?'Paid':'Partial',paymentDate:form.date,paymentMethod:form.method,paymentNotes:form.notes.trim()};
+       const nextAssignments=existing?currentAssignments.map(v=>v.vendorId===paymentVendor.id?updatedVendor:v):[...currentAssignments,updatedVendor];
+       await onUpdateBooking(invoiceBooking.id,{assignedVendors:nextAssignments});
+     } else if(!invoiceBooking){
+       alert('This payment was saved in Vendor Payment History, but the selected invoice has no linked booking. Create/link the booking before recording a payment that should appear in Dashboard and P&L.');
+     }
+     setPaymentOpen(false);
+   }catch(error){
+     console.error('Failed to save vendor payment:',error);
+     alert(error instanceof Error?error.message:'Unable to save vendor payment. Please try again.');
+   }
  };
 
  const openPayment=(id?:string,invoiceId?:string,complete=false)=>{
@@ -73,39 +80,14 @@ export const VendorsView:React.FC<VendorsViewProps>=({vendors:inputVendors=[],bo
    const existing=payments.filter(p=>p.vendorId===idToUse);
    const first=invoiceId||existing.find(p=>p.invoiceId&&Number(p.totalAmount)>existing.filter(x=>x.invoiceId===p.invoiceId).reduce((s,x)=>s+Number(x.amount||0),0))?.invoiceId||'';
    let total='';
-   if(first){
-     const inv=invoices.find(i=>i.id===first);
-     const b=inv?.bookingId?bookings.find(x=>x.id===inv.bookingId):undefined;
-     const a=b?.assignedVendors?.find(x=>x.vendorId===idToUse);
-     const old=existing.find(p=>p.invoiceId===first);
-     total=String(old?.totalAmount||a?.agreedAmount||inv?.totalAmount||'');
-   }
+   if(first){const inv=invoices.find(i=>i.id===first);const b=inv?.bookingId?bookings.find(x=>x.id===inv.bookingId):undefined;const a=b?.assignedVendors?.find(x=>x.vendorId===idToUse);const old=existing.find(p=>p.invoiceId===first);total=String(old?.totalAmount||a?.agreedAmount||inv?.totalAmount||'');}
    const prior=existing.filter(p=>p.invoiceId===first).reduce((s,p)=>s+Number(p.amount||0),0);
    const rem=Math.max(0,Number(total||0)-prior);
    setForm({invoiceId:first,totalAmount:total,paidAmount:complete&&rem>0?String(rem):'',date:new Date().toISOString().slice(0,10),method:'Cash',notes:''});
    setPaymentOpen(true);
  };
-
- const invoiceChange=(id:string)=>{
-   const inv=invoices.find(i=>i.id===id);
-   const b=inv?.bookingId?bookings.find(x=>x.id===inv.bookingId):undefined;
-   const a=b?.assignedVendors?.find(x=>x.vendorId===paymentVendor?.id);
-   const old=payments.find(p=>p.vendorId===paymentVendor?.id&&p.invoiceId===id);
-   setForm(f=>({...f,invoiceId:id,totalAmount:String(old?.totalAmount||a?.agreedAmount||inv?.totalAmount||''),paidAmount:''}));
- };
-
- const saveVendor=async(e:React.FormEvent<HTMLFormElement>)=>{
-   e.preventDefault();
-   try{
-     const normalized={...vendorForm,vendorName:vendorForm.vendorName.trim()||'Unnamed Vendor',category:vendorForm.category||'Other'};
-     const saved=editing?await onUpdateVendor(editing.id,normalized):await onCreateVendor(normalized);
-     setSelectedVendor(saved);
-     setVendorOpen(false);
-   }catch(error){
-     console.error('Failed to save vendor:',error);
-     alert(error instanceof Error?error.message:'Unable to save vendor. Please try again.');
-   }
- };
+ const invoiceChange=(id:string)=>{const inv=invoices.find(i=>i.id===id);const b=inv?.bookingId?bookings.find(x=>x.id===inv.bookingId):undefined;const a=b?.assignedVendors?.find(x=>x.vendorId===paymentVendor?.id);const old=payments.find(p=>p.vendorId===paymentVendor?.id&&p.invoiceId===id);setForm(f=>({...f,invoiceId:id,totalAmount:String(old?.totalAmount||a?.agreedAmount||inv?.totalAmount||''),paidAmount:''}));};
+ const saveVendor=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();try{const normalized={...vendorForm,vendorName:vendorForm.vendorName.trim()||'Unnamed Vendor',category:vendorForm.category||'Other'};const saved=editing?await onUpdateVendor(editing.id,normalized):await onCreateVendor(normalized);setSelectedVendor(saved);setVendorOpen(false);}catch(error){console.error('Failed to save vendor:',error);alert(error instanceof Error?error.message:'Unable to save vendor. Please try again.');}};
  const deletePayment=(id:string)=>{const next=payments.filter(p=>p.id!==id);setPayments(next);localStorage.setItem(KEY,JSON.stringify(next));};
  const openAdd=()=>{setEditing(null);setVendorForm({vendorName:'',category:'Other',contactPerson:'',phone:'',whatsApp:'',email:'',address:'',services:'',paymentTerms:'',notes:''});setVendorOpen(true);};
  const openEdit=(v:Vendor)=>{setEditing(v);setVendorForm({vendorName:v.vendorName||'',category:v.category||'Other',contactPerson:v.contactPerson||'',phone:v.phone||'',whatsApp:v.whatsApp||'',email:v.email||'',address:v.address||'',services:v.services||'',paymentTerms:v.paymentTerms||'',notes:v.notes||''});setVendorOpen(true);};
