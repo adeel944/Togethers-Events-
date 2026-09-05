@@ -42,7 +42,6 @@ export default function App() {
       const payments = JSON.parse(raw);
       if (!Array.isArray(payments) || !payments.length) return freshBookings;
       let result = [...freshBookings];
-
       const grouped = new Map<string, any>();
       for (const p of payments) {
         const key = `${p.invoiceId || ''}|${String(p.vendorId || '')}`;
@@ -54,7 +53,6 @@ export default function App() {
         if (!current.totalAmount && p.totalAmount) current.totalAmount = Number(p.totalAmount);
         grouped.set(key, current);
       }
-
       for (const p of grouped.values()) {
         const invoice = freshInvoices.find(i => i.id === p.invoiceId);
         const bookingId = invoice?.bookingId;
@@ -69,9 +67,7 @@ export default function App() {
         const updatedVendor: BookingVendor = existing
           ? { ...existing, agreedAmount, paidAmount, paymentStatus: paidAmount >= agreedAmount && agreedAmount > 0 ? 'Paid' : paidAmount > 0 ? 'Partial' : 'Pending', paymentDate: p.date || existing.paymentDate, paymentMethod: p.method || existing.paymentMethod, paymentNotes: p.notes || existing.paymentNotes }
           : { id: `legacy-bv-${booking.id}-${vendorId}`, vendorId, vendorName: '', category: 'Other', agreedAmount, paidAmount, paymentStatus: paidAmount >= agreedAmount && agreedAmount > 0 ? 'Paid' : paidAmount > 0 ? 'Partial' : 'Pending', paymentDate: p.date, paymentMethod: p.method, paymentNotes: p.notes };
-        const nextAssignments = existing
-          ? (booking.assignedVendors || []).map(v => v.vendorId === vendorId ? updatedVendor : v)
-          : [...(booking.assignedVendors || []), updatedVendor];
+        const nextAssignments = existing ? (booking.assignedVendors || []).map(v => v.vendorId === vendorId ? updatedVendor : v) : [...(booking.assignedVendors || []), updatedVendor];
         const updated = await bookingService.updateBooking(booking.id, { assignedVendors: nextAssignments });
         result = result.map(b => b.id === updated.id ? updated : b);
       }
@@ -131,6 +127,7 @@ export default function App() {
       const { invoice: created, booking } = await createInvoiceWithBooking(invoiceData);
       if (booking) await refreshBookings(booking); else await refreshBookings();
       setInvoices(await invoiceService.getInvoices());
+      setPreviewInvoice(created);
       return created;
     } catch (error) {
       console.error('Invoice save failed:', error);
