@@ -65,11 +65,12 @@ export const bookingService = {
     const businessId = await getBusinessId();
     const totalAmount = Number(payload.totalAmount || 0);
     const advancePaid = Number(payload.advancePaid || 0);
-    const { assignedVendors = [], ...bookingPayload } = payload;
-    const { data, error } = await supabase.from('bookings').insert({ business_id: businessId, client_id: bookingPayload.clientId, event_type: bookingPayload.eventType, event_date: bookingPayload.eventDate, event_time: bookingPayload.eventTime || '', venue: bookingPayload.venue || '', guest_count: Number(bookingPayload.guestCount || 0), package: bookingPayload.package || '', total_amount: totalAmount, advance_paid: advancePaid, booking_status: bookingPayload.bookingStatus, payment_status: bookingPayload.paymentStatus || (advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending'), notes: bookingPayload.notes || '' }).select('*').single();
+    const { assignedVendors = {}, ...bookingPayload } = payload;
+    const { data, error } = await supabase.from('bookings').insert({ business_id: businessId, client_id: bookingPayload.clientId, event_type: bookingPayload.eventType, event_date: bookingPayload.eventDate, event_time: bookingPayload.eventTime || '', venue: bookingPayload.venue || '', guest_count: Number(bookingPayload.guestCount || 0), package: bookingPayload.package || '', total_amount: totalAmount, advance_paid: advancePaid, booking_status: bookingPayload.bookingStatus, notes: bookingPayload.notes || '' }).select('*').single();
     if (error) throw error;
-    if (assignedVendors.length) {
-      const { error: vendorError } = await supabase.from('booking_vendors').insert(assignedVendors.map((vendor) => ({ business_id: businessId, booking_id: data.id, ...vendorDbPayload(vendor) })));
+    const vendorList = Array.isArray(assignedVendors) ? assignedVendors : [];
+    if (vendorList.length) {
+      const { error: vendorError } = await supabase.from('booking_vendors').insert(vendorList.map((vendor) => ({ business_id: businessId, booking_id: data.id, ...vendorDbPayload(vendor) })));
       if (vendorError) { await supabase.from('bookings').delete().eq('id', data.id).eq('business_id', businessId); throw vendorError; }
     }
     return this.getBookingById(data.id) as Promise<Booking>;
@@ -80,7 +81,7 @@ export const bookingService = {
     if (!current) throw new Error('Booking not found');
     const totalAmount = updates.totalAmount !== undefined ? Number(updates.totalAmount || 0) : current.totalAmount;
     const advancePaid = updates.advancePaid !== undefined ? Number(updates.advancePaid || 0) : current.advancePaid;
-    const { assignedVendors, id: _id, createdAt: _createdAt, remainingAmount: _remaining, clientName: _clientName, paymentStatus, ...updatesWithoutLocalFields } = updates;
+    const { assignedVendors, id: _id, createdAt: _createdAt, remainingAmount: _remaining, clientName: _clientName, paymentStatus: _paymentStatus, ...updatesWithoutLocalFields } = updates;
     const dbUpdates: Record<string, any> = {};
     if (updatesWithoutLocalFields.clientId !== undefined) dbUpdates.client_id = updatesWithoutLocalFields.clientId;
     if (updatesWithoutLocalFields.eventType !== undefined) dbUpdates.event_type = updatesWithoutLocalFields.eventType;
@@ -93,7 +94,6 @@ export const bookingService = {
     if (updatesWithoutLocalFields.notes !== undefined) dbUpdates.notes = updatesWithoutLocalFields.notes || '';
     dbUpdates.total_amount = totalAmount;
     dbUpdates.advance_paid = advancePaid;
-    if (paymentStatus !== undefined) dbUpdates.payment_status = paymentStatus;
     const { data, error } = await supabase.from('bookings').update(dbUpdates).eq('id', id).eq('business_id', businessId).select('*').single();
     if (error) throw error;
     if (assignedVendors !== undefined) {
