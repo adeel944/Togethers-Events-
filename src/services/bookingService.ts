@@ -66,7 +66,7 @@ export const bookingService = {
     const totalAmount = Number(payload.totalAmount || 0);
     const advancePaid = Number(payload.advancePaid || 0);
     const { assignedVendors = [], ...bookingPayload } = payload;
-    const { data, error } = await supabase.from('bookings').insert({ business_id: businessId, client_id: bookingPayload.clientId, event_type: bookingPayload.eventType, event_date: bookingPayload.eventDate, event_time: bookingPayload.eventTime || '', venue: bookingPayload.venue || '', guest_count: Number(bookingPayload.guestCount || 0), package: bookingPayload.package || '', total_amount: totalAmount, advance_paid: advancePaid, remaining_amount: Math.max(0, totalAmount - advancePaid), booking_status: bookingPayload.bookingStatus, payment_status: bookingPayload.paymentStatus || (advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending'), notes: bookingPayload.notes || '' }).select('*').single();
+    const { data, error } = await supabase.from('bookings').insert({ business_id: businessId, client_id: bookingPayload.clientId, event_type: bookingPayload.eventType, event_date: bookingPayload.eventDate, event_time: bookingPayload.eventTime || '', venue: bookingPayload.venue || '', guest_count: Number(bookingPayload.guestCount || 0), package: bookingPayload.package || '', total_amount: totalAmount, advance_paid: advancePaid, booking_status: bookingPayload.bookingStatus, payment_status: bookingPayload.paymentStatus || (advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending'), notes: bookingPayload.notes || '' }).select('*').single();
     if (error) throw error;
     if (assignedVendors.length) {
       const { error: vendorError } = await supabase.from('booking_vendors').insert(assignedVendors.map((vendor) => ({ business_id: businessId, booking_id: data.id, ...vendorDbPayload(vendor) })));
@@ -93,7 +93,6 @@ export const bookingService = {
     if (updatesWithoutLocalFields.notes !== undefined) dbUpdates.notes = updatesWithoutLocalFields.notes || '';
     dbUpdates.total_amount = totalAmount;
     dbUpdates.advance_paid = advancePaid;
-    dbUpdates.remaining_amount = Math.max(0, totalAmount - advancePaid);
     if (paymentStatus !== undefined) dbUpdates.payment_status = paymentStatus;
     const { data, error } = await supabase.from('bookings').update(dbUpdates).eq('id', id).eq('business_id', businessId).select('*').single();
     if (error) throw error;
