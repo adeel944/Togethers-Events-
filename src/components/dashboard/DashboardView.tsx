@@ -124,40 +124,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const avg = bookings.length ? Math.round(bookings.reduce((sum, booking) => sum + Number(booking.totalAmount || 0), 0) / bookings.length) : 0;
   const rate = bookings.length ? Math.round((confirmedBookings / bookings.length) * 100) : 0;
 
-  // ECG-inspired path: real booking/expense data controls the signal, while short pulse peaks give it a premium monitor feel.
-  const buildEcgPath = (key: 'booking' | 'expense') => {
+  // Clean ECG-inspired business line: the data remains natural, with tiny dots and only a hint of cinematic depth.
+  const buildLinePath = (key: 'booking' | 'expense') => {
     if (!chartData.length) return '';
     const max = key === 'booking' ? maxBooking : maxExpense;
-    const values = chartData.map((point, index) => {
-      const current = point[key];
-      const previous = chartData[index - 1]?.[key] ?? current;
-      const next = chartData[index + 1]?.[key] ?? current;
-      return previous * 0.2 + current * 0.6 + next * 0.2;
-    });
-    const points = values.map((value, index) => ({
+    const points = chartData.map((point, index) => ({
       x: chartData.length === 1 ? 50 : (index / (chartData.length - 1)) * 100,
-      y: 78 - (value / max) * 50,
+      y: 80 - (point[key] / max) * 54,
     }));
-    if (points.length === 1) return 'M 0 78 L 38 78 L 46 78 L 49 78 L 50 28 L 51 78 L 54 78 L 62 78 L 100 78';
-
-    let path = `M 0 ${points[0].y}`;
-    points.forEach((point, index) => {
-      if (index === 0) return;
-      const previous = points[index - 1];
-      const dx = point.x - previous.x;
-      const pulse = Math.min(9, Math.max(3, Math.abs(point.y - previous.y) * 0.24));
-      const base = previous.y + (point.y - previous.y) * 0.5;
-      path += ` L ${previous.x + dx * 0.24} ${previous.y}`;
-      path += ` L ${previous.x + dx * 0.39} ${previous.y + pulse}`;
-      path += ` L ${previous.x + dx * 0.50} ${base}`;
-      path += ` L ${previous.x + dx * 0.61} ${previous.y - pulse}`;
-      path += ` L ${point.x} ${point.y}`;
-    });
-    return `${path} L 100 ${points[points.length - 1].y}`;
+    if (points.length === 1) return `M 0 ${points[0].y} L 100 ${points[0].y}`;
+    return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
   };
 
-  const bookingEcgPath = buildEcgPath('booking');
-  const expenseEcgPath = buildEcgPath('expense');
+  const bookingLinePath = buildLinePath('booking');
+  const expenseLinePath = buildLinePath('expense');
 
   return (
     <div className="space-y-6 sm:space-y-7 animate-in fade-in duration-200">
@@ -192,33 +172,35 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="flex items-center gap-1"><button onClick={() => setChartMonth(new Date(chartMonth.getFullYear(), chartMonth.getMonth() - 1, 1))} className="p-1.5 rounded-lg bg-white/60 border border-white/80 text-slate-500" aria-label="Previous chart month"><ChevronLeft className="w-3.5 h-3.5" /></button><button onClick={() => setChartMonth(new Date(chartMonth.getFullYear(), chartMonth.getMonth() + 1, 1))} className="p-1.5 rounded-lg bg-white/60 border border-white/80 text-slate-500" aria-label="Next chart month"><ChevronRight className="w-3.5 h-3.5" /></button></div>
           </div>
 
-          <div className="relative h-[340px] overflow-hidden rounded-[22px] border border-slate-700/40 bg-[#07111f] shadow-[inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-30px_60px_rgba(2,6,23,0.45),0_20px_50px_rgba(15,23,42,0.18)]">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(14,165,233,0.14),transparent_48%)]" />
-            <div className="absolute inset-0 opacity-30 bg-[linear-gradient(rgba(56,189,248,0.18)_1px,transparent_1px),linear-gradient(90deg,rgba(56,189,248,0.18)_1px,transparent_1px)] bg-[size:34px_34px]" />
-            <div className="absolute inset-0 opacity-10 bg-[linear-gradient(90deg,transparent_0%,rgba(255,255,255,0.55)_48%,transparent_50%)] bg-[size:220px_100%]" />
-            <div className="absolute left-4 top-4 text-[8px] tracking-[0.24em] uppercase text-slate-500">Business activity monitor</div>
-            <div className="absolute right-4 top-4 flex items-center gap-1.5 text-[8px] tracking-[0.16em] uppercase text-slate-500"><span className="w-1.5 h-1.5 rounded-full bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.9)]" /> Signal</div>
+          <div className="relative h-[340px] overflow-hidden rounded-[22px] border border-white/70 bg-white/28 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_18px_45px_rgba(15,23,42,0.08)]">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_48%_42%,rgba(56,189,248,0.10),transparent_44%)]" />
+            <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.34),transparent_42%,rgba(255,255,255,0.12))]" />
+            <div className="absolute left-4 top-4 text-[8px] tracking-[0.24em] uppercase text-slate-400">Business activity</div>
+            <div className="absolute right-4 top-4 flex items-center gap-1.5 text-[8px] tracking-[0.16em] uppercase text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.75)]" /> Live trend</div>
 
             <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
               <defs>
-                <linearGradient id="ecgBlue" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#38bdf8" stopOpacity="0.38" /><stop offset="45%" stopColor="#7dd3fc" stopOpacity="1" /><stop offset="100%" stopColor="#22d3ee" stopOpacity="0.72" /></linearGradient>
-                <linearGradient id="ecgRed" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#fb7185" stopOpacity="0.28" /><stop offset="50%" stopColor="#fda4af" stopOpacity="0.92" /><stop offset="100%" stopColor="#fb7185" stopOpacity="0.48" /></linearGradient>
-                <filter id="blueGlow" x="-20%" y="-60%" width="140%" height="220%"><feGaussianBlur stdDeviation="1.5" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-                <filter id="redGlow" x="-20%" y="-60%" width="140%" height="220%"><feGaussianBlur stdDeviation="1.1" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-                <filter id="lineDepth" x="-20%" y="-50%" width="140%" height="200%"><feDropShadow dx="0" dy="2" stdDeviation="1.4" floodOpacity="0.5" /></filter>
+                <linearGradient id="glassBlue" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#38bdf8" stopOpacity="0.42" /><stop offset="48%" stopColor="#0ea5e9" stopOpacity="0.95" /><stop offset="100%" stopColor="#22d3ee" stopOpacity="0.62" /></linearGradient>
+                <linearGradient id="glassRose" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#fb7185" stopOpacity="0.34" /><stop offset="52%" stopColor="#f43f5e" stopOpacity="0.82" /><stop offset="100%" stopColor="#fb7185" stopOpacity="0.48" /></linearGradient>
+                <filter id="softBlue" x="-10%" y="-30%" width="120%" height="160%"><feGaussianBlur stdDeviation="0.8" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+                <filter id="softRose" x="-10%" y="-30%" width="120%" height="160%"><feGaussianBlur stdDeviation="0.65" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
               </defs>
-              <g stroke="#67e8f9" strokeOpacity="0.065" strokeWidth="0.22" vectorEffect="non-scaling-stroke">
-                {[12,24,36,48,60,72,84].map((y) => <line key={`h-${y}`} x1="0" y1={y} x2="100" y2={y} />)}
+              <g stroke="#64748b" strokeOpacity="0.11" strokeWidth="0.2" vectorEffect="non-scaling-stroke">
+                {[16,30,44,58,72,86].map((y) => <line key={`h-${y}`} x1="0" y1={y} x2="100" y2={y} />)}
                 {[5,15,25,35,45,55,65,75,85,95].map((x) => <line key={`v-${x}`} x1={x} y1="0" x2={x} y2="100" />)}
               </g>
-              <path d={bookingEcgPath} fill="none" stroke="#0ea5e9" strokeOpacity="0.30" strokeWidth="2.8" vectorEffect="non-scaling-stroke" filter="url(#blueGlow)" />
-              <path d={bookingEcgPath} fill="none" stroke="url(#ecgBlue)" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" filter="url(#lineDepth)" />
-              <path d={expenseEcgPath} fill="none" stroke="#fb7185" strokeOpacity="0.22" strokeWidth="2.5" vectorEffect="non-scaling-stroke" filter="url(#redGlow)" />
-              <path d={expenseEcgPath} fill="none" stroke="url(#ecgRed)" strokeWidth="0.82" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+              <path d={bookingLinePath} fill="none" stroke="#38bdf8" strokeOpacity="0.16" strokeWidth="2.2" strokeLinecap="round" vectorEffect="non-scaling-stroke" filter="url(#softBlue)" />
+              <path d={bookingLinePath} fill="none" stroke="url(#glassBlue)" strokeWidth="0.95" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+              <path d={expenseLinePath} fill="none" stroke="#fb7185" strokeOpacity="0.13" strokeWidth="1.9" strokeLinecap="round" vectorEffect="non-scaling-stroke" filter="url(#softRose)" />
+              <path d={expenseLinePath} fill="none" stroke="url(#glassRose)" strokeWidth="0.8" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
               {chartData.map((point, index) => {
                 const x = chartData.length === 1 ? 50 : (index / (chartData.length - 1)) * 100;
-                const y = 78 - (point.booking / maxBooking) * 50;
-                return <g key={`${point.label}-${index}`}><circle cx={x} cy={y} r="1.8" fill="#07111f" stroke="#7dd3fc" strokeWidth="0.65" vectorEffect="non-scaling-stroke" /><circle cx={x} cy={y} r="0.55" fill="#e0f2fe" /></g>;
+                const bookingY = 80 - (point.booking / maxBooking) * 54;
+                const expenseY = 80 - (point.expense / maxExpense) * 54;
+                return <g key={`${point.label}-${index}`}>
+                  <circle cx={x} cy={bookingY} r="0.9" fill="#ffffff" stroke="#0ea5e9" strokeWidth="0.55" vectorEffect="non-scaling-stroke" />
+                  <circle cx={x} cy={expenseY} r="0.8" fill="#ffffff" stroke="#f43f5e" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
+                </g>;
               })}
             </svg>
 
