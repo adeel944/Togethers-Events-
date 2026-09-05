@@ -13,69 +13,105 @@ const waitForInvoiceAssets = async (element: HTMLElement) => {
   })));
 };
 
+const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
 export const downloadInvoicePdf = async (elementId: string, invoiceNumber: string): Promise<void> => {
-  const element = document.getElementById(elementId) as HTMLElement | null;
-  if (!element) throw new Error('Invoice preview element not found');
+  const source = document.getElementById(elementId) as HTMLElement | null;
+  if (!source) throw new Error('Invoice preview element not found.');
 
-  await waitForInvoiceAssets(element);
+  await waitForInvoiceAssets(source);
+  await nextFrame();
 
-  const width = Math.max(element.scrollWidth, element.clientWidth, 1);
-  const height = Math.max(element.scrollHeight, element.clientHeight, 1);
-  const maxCanvasDimension = 7000;
-  const scale = Math.max(1, Math.min(2, maxCanvasDimension / Math.max(width, height)));
+  // Render a clean, fixed-width clone instead of the horizontally scrollable preview wrapper.
+  const clone = source.cloneNode(true) as HTMLElement;
+  clone.setAttribute('data-pdf-export', 'true');
+  clone.style.position = 'fixed';
+  clone.style.left = '-100000px';
+  clone.style.top = '0';
+  clone.style.width = '794px';
+  clone.style.maxWidth = '794px';
+  clone.style.height = 'auto';
+  clone.style.maxHeight = 'none';
+  clone.style.overflow = 'visible';
+  clone.style.background = '#ffffff';
+  clone.style.boxSizing = 'border-box';
+  clone.style.zIndex = '-1';
+  document.body.appendChild(clone);
 
-  const canvas = await html2canvas(element, {
-    scale,
-    useCORS: true,
-    allowTaint: false,
-    logging: false,
-    backgroundColor: '#ffffff',
-    imageTimeout: 15000,
-    width,
-    height,
-    scrollX: 0,
-    scrollY: -window.scrollY,
-  });
+  try {
+    await waitForInvoiceAssets(clone);
+    await nextFrame();
 
-  if (!canvas.width || !canvas.height) throw new Error('Could not render invoice for PDF.');
+    const width = Math.max(clone.scrollWidth, clone.clientWidth, 794);
+    const height = Math.max(clone.scrollHeight, clone.clientHeight, 1);
+    const maxCanvasDimension = 9000;
+    const scale = Math.max(1, Math.min(2, maxCanvasDimension / Math.max(width, height)));
 
-  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
-  const pdfWidth = pdf.internal.pageSize.getWidth();
-  const pdfPageHeight = pdf.internal.pageSize.getHeight();
-  const pageCanvasHeight = Math.max(1, Math.floor((canvas.width * pdfPageHeight) / pdfWidth));
+    const canvas = await html2canvas(clone, {
+      scale,
+      useCORS: true,
+      allowTaint: false,
+      logging: false,
+      backgroundColor: '#ffffff',
+      imageTimeout: 15000,
+      width,
+      height,
+      windowWidth: width,
+      windowHeight: Math.max(height, 900),
+      scrollX: 0,
+      scrollY: 0,
+    });
 
-  let offsetY = 0;
-  let pageIndex = 0;
-  while (offsetY < canvas.height) {
-    const sliceHeight = Math.min(pageCanvasHeight, canvas.height - offsetY);
-    const pageCanvas = document.createElement('canvas');
-    pageCanvas.width = canvas.width;
-    pageCanvas.height = sliceHeight;
-    const ctx = pageCanvas.getContext('2d');
-    if (!ctx) throw new Error('Could not prepare PDF page.');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-    ctx.drawImage(canvas, 0, offsetY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+    if (!canvas.width || !canvas.height) throw new Error('Could not render invoice for PDF.');
 
-    if (pageIndex > 0) pdf.addPage();
-    const pageHeightMm = (sliceHeight * pdfWidth) / canvas.width;
-    pdf.addImage(pageCanvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pdfWidth, pageHeightMm, undefined, 'FAST');
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfPageHeight = pdf.internal.pageSize.getHeight();
+    const pageCanvasHeight = Math.max(1, Math.floor((canvas.width * pdfPageHeight) / pdfWidth));
 
-    offsetY += sliceHeight;
-    pageIndex += 1;
+    let offsetY = 0;
+    let pageIndex = 0;
+    while (offsetY < canvas.height) {
+      const sliceHeight = Math.min(pageCanvasHeight, canvas.height - offsetY);
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceHeight;
+      const ctx = pageCanvas.getContext('2d');
+      if (!ctx) throw new Error('Could not prepare PDF page.');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      ctx.drawImage(canvas, 0, offsetY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+
+      if (pageIndex > 0) pdf.addPage();
+      const pageHeightMm = (sliceHeight * pdfWidth) / canvas.width;
+      pdf.addImage(pageCanvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pdfWidth, pageHeightMm, undefined, 'FAST');
+
+      offsetY += sliceHeight;
+      pageIndex += 1;
+    }
+
+    const safeNumber = String(invoiceNumber || 'invoice').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'invoice';
+    const filename = `Invoice-${safeNumber}.pdf`;
+    const blob = pdf.output('blob');
+    if (!blob || blob.size < 1000) throw new Error('The generated PDF is empty.');
+
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }
+  } finally {
+    clone.remove();
   }
-
-  const safeNumber = String(invoiceNumber || 'invoice').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'invoice';
-  const blob = pdf.output('blob');
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `Invoice-${safeNumber}.pdf`;
-  link.rel = 'noopener';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
 export const generateWhatsAppUrl = (invoice: Invoice, profile: BusinessProfile): string => {
