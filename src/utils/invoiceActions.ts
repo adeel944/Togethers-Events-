@@ -38,14 +38,15 @@ const toLegacyColor = (value: string) => {
   }
 };
 
-const isColorProperty = (property: string) => property === 'color' || property === 'caret-color' || property.endsWith('color');
-
-const sanitizeComputedValue = (property: string, value: string, computed: CSSStyleDeclaration) => {
-  if (!unsupportedColorPattern.test(value)) return value;
-  if (isColorProperty(property)) return toLegacyColor(value);
-  if (property.includes('shadow') || property === 'background-image' || property === 'mask-image' || property === 'mask-border-source' || property === 'border-image-source' || property === 'filter' || property === 'backdrop-filter') return 'none';
-  if (property === 'background') return toLegacyColor(computed.backgroundColor);
-  return null;
+const sanitizeCssText = (css: string) => {
+  // html2canvas cannot parse Tailwind's oklch/oklab colors. Replace only
+  // unsupported color functions inside copied stylesheets; keep the rest of
+  // the stylesheet intact so borders, spacing, grids, fonts and backgrounds
+  // render exactly like the desktop invoice.
+  return css
+    .replace(/oklch\\([^)]*\\)/gi, '#000000')
+    .replace(/oklab\\([^)]*\\)/gi, '#000000')
+    .replace(/color\\([^)]*\\)/gi, '#000000');
 };
 
 const buildDesktopInvoice = async (source: HTMLElement, doc: Document, win: Window, width: number) => {
@@ -63,73 +64,41 @@ const buildDesktopInvoice = async (source: HTMLElement, doc: Document, win: Wind
   clone.style.backgroundColor = '#ffffff';
   clone.style.boxSizing = 'border-box';
 
+  // Copy stylesheets into the isolated desktop iframe, sanitizing unsupported
+  // color functions before html2canvas sees them.
   for (const node of Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))) {
-    doc.head.appendChild(node.cloneNode(true));
+    if (node.tagName.toLowerCase() === 'style') {
+      const style = doc.createElement('style');
+      style.textContent = sanitizeCssText(node.textContent || '');
+      doc.head.appendChild(style);
+    } else {
+      const link = node as HTMLLinkElement;
+      const href = link.href;
+      if (href) {
+        const copied = doc.createElement('link');
+        copied.rel = 'stylesheet';
+        copied.href = href;
+        doc.head.appendChild(copied);
+      }
+    }
   }
 
   doc.body.appendChild(clone);
   await waitForInvoiceAssets(clone, doc);
   await nextFrame(win);
 
-  // Freeze the desktop computed layout so responsive/mobile rules cannot
-  // change the PDF, while converting every modern color function to a legacy
-  // color that html2canvas can parse safely.
-  const nodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
-  for (const node of nodes) {
-    const computed = win.getComputedStyle(node);
-    const properties: Array<[string, string]> = [];
-
-    for (let p = 0; p < computed.length; p += 1) {
-      const property = computed.item(p);
-      if (!property || property.startsWith('--')) continue;
-      const rawValue = computed.getPropertyValue(property);
-      if (!rawValue) continue;
-      const safeValue = sanitizeComputedValue(property, rawValue, computed);
-      if (safeValue !== null) properties.push([property, safeValue]);
+  // Sanitize inline style attributes and SVG presentation attributes as well.
+  for (const node of Array.from(clone.querySelectorAll<HTMLElement>('*'))) {
+    const style = node.getAttribute('style');
+    if (style && unsupportedColorPattern.test(style)) {
+      node.setAttribute('style', sanitizeCssText(style));
     }
-
-    node.removeAttribute('class');
-    node.removeAttribute('style');
-
-    for (const [property, value] of properties) {
-      try { node.style.setProperty(property, value); } catch { /* ignore */ }
-    }
-
-    const colorPairs: Array<[string, string]> = [
-      ['color', computed.color],
-      ['background-color', computed.backgroundColor],
-      ['border-top-color', computed.borderTopColor],
-      ['border-right-color', computed.borderRightColor],
-      ['border-bottom-color', computed.borderBottomColor],
-      ['border-left-color', computed.borderLeftColor],
-      ['outline-color', computed.outlineColor],
-      ['text-decoration-color', computed.textDecorationColor],
-    ];
-    for (const [property, value] of colorPairs) {
-      if (!value || value === 'transparent') continue;
-      try { node.style.setProperty(property, toLegacyColor(value)); } catch { /* ignore */ }
-    }
-
     for (const attribute of ['fill', 'stroke', 'stop-color', 'flood-color', 'lighting-color', 'color']) {
       const value = node.getAttribute(attribute);
       if (value && unsupportedColorPattern.test(value)) node.setAttribute(attribute, toLegacyColor(value));
     }
   }
 
-  // Prevent any descendant from extending the capture area horizontally.
-  // This is important for invoice tables/long text on desktop and mobile.
-  for (const node of [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))]) {
-    node.style.maxWidth = '100%';
-    node.style.boxSizing = 'border-box';
-    if (node.tagName === 'TABLE') {
-      node.style.width = '100%';
-      node.style.minWidth = '0';
-    }
-    if (node.tagName === 'IMG') node.style.maxWidth = '100%';
-  }
-
-  clone.style.position = 'static';
-  clone.style.margin = '0';
   clone.style.width = `${width}px`;
   clone.style.minWidth = `${width}px`;
   clone.style.maxWidth = `${width}px`;
@@ -178,11 +147,9 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
     const isolated = await buildDesktopInvoice(invoiceSheet, isolatedDocument, isolatedWindow, DESKTOP_CSS_WIDTH);
     await nextFrame(isolatedWindow);
 
-    const rect = isolated.getBoundingClientRect();
-    const height = Math.max(1, Math.ceil(isolated.scrollHeight), Math.ceil(rect.height));
+    const height = Math.max(1, Math.ceil(isolated.scrollHeight), Math.ceil(isolated.getBoundingClientRect().height));
     isolated.style.height = `${height}px`;
     isolated.style.minHeight = `${height}px`;
-    isolated.style.overflow = 'visible';
     await nextFrame(isolatedWindow);
 
     const canvas = await html2canvas(isolated, {
@@ -220,27 +187,20 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const cssPxToMm = 25.4 / 96;
-  const sidePaddingMm = 4;
-  const maxWidthMm = pageWidth - sidePaddingMm * 2;
+  const maxWidthMm = pageWidth - 4;
   const naturalWidthMm = cssWidth * cssPxToMm;
   const scale = Math.min(1, maxWidthMm / naturalWidthMm);
   const imageWidthMm = naturalWidthMm * scale;
   const imageHeightMm = cssHeight * cssPxToMm * scale;
-  const leftMargin = Math.max(0, (pageWidth - imageWidthMm) / 2);
-
-  // The canvas already represents the complete invoice width. Never crop it
-  // horizontally; only split the image vertically when it needs more than one
-  // A4 page.
-  const imageData = canvas.toDataURL('image/jpeg', 0.95);
+  const leftMargin = (pageWidth - imageWidthMm) / 2;
 
   if (imageHeightMm <= pageHeight) {
-    pdf.addImage(imageData, 'JPEG', leftMargin, 0, imageWidthMm, imageHeightMm, undefined, 'FAST');
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', leftMargin, 0, imageWidthMm, imageHeightMm, undefined, 'FAST');
   } else {
     const pageCssHeight = pageHeight / cssPxToMm / scale;
     const pageCanvasHeight = Math.max(1, Math.floor(pageCssHeight * 2));
     let offsetY = 0;
     let pageIndex = 0;
-
     while (offsetY < canvas.height) {
       const sliceHeight = Math.min(pageCanvasHeight, canvas.height - offsetY);
       const pageCanvas = document.createElement('canvas');
@@ -251,16 +211,13 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
       ctx.drawImage(canvas, 0, offsetY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
-
       if (pageIndex > 0) pdf.addPage();
       const sliceHeightMm = (sliceHeight / 2) * cssPxToMm * scale;
       pdf.addImage(pageCanvas.toDataURL('image/jpeg', 0.95), 'JPEG', leftMargin, 0, imageWidthMm, sliceHeightMm, undefined, 'FAST');
-
       offsetY += sliceHeight;
       pageIndex += 1;
     }
   }
-
   pdf.save(getSafeFilename(invoiceNumber));
 };
 
