@@ -10,7 +10,7 @@ async function getBusinessId(): Promise<string> {
 }
 
 function mapBookingVendor(row: any): BookingVendor {
-  return { id: row.id, vendorId: row.vendor_id, vendorName: row.vendor_name, category: row.category, agreedAmount: Number(row.agreed_amount || 0), paymentStatus: row.payment_status, notes: row.notes || '' };
+  return { id: row.id, vendorId: row.vendor_id, vendorName: row.vendor_name, category: row.category, agreedAmount: Number(row.agreed_amount || 0), paymentStatus: row.payment_status || 'Pending', paidAmount: Number(row.paid_amount || 0), paymentDate: row.payment_date || undefined, paymentMethod: row.payment_method || undefined, paymentNotes: row.payment_notes || undefined, notes: row.notes || '' };
 }
 
 function mapBooking(row: any, vendorRows: any[] = [], clientName = ''): Booking {
@@ -36,7 +36,6 @@ async function loadBookingsForBusiness(businessId: string): Promise<any[]> {
   const primary = await supabase.from('bookings').select('*').eq('business_id', businessId).order('created_at', { ascending: false });
   if (primary.error) throw primary.error;
   if (primary.data?.length) return primary.data;
-
   const { data: clients, error: clientError } = await supabase.from('clients').select('id').eq('business_id', businessId);
   if (clientError || !clients?.length) return [];
   const clientIds = clients.map((client: any) => client.id).filter(Boolean);
@@ -45,6 +44,8 @@ async function loadBookingsForBusiness(businessId: string): Promise<any[]> {
   return legacyBookings || [];
 }
 
+const vendorDbPayload = (vendor: BookingVendor) => ({ vendor_id: vendor.vendorId, vendor_name: vendor.vendorName, category: vendor.category, agreed_amount: Number(vendor.agreedAmount || 0), payment_status: vendor.paymentStatus || 'Pending', paid_amount: Number(vendor.paidAmount || 0), payment_date: vendor.paymentDate || null, payment_method: vendor.paymentMethod || null, payment_notes: vendor.paymentNotes || null, notes: vendor.notes || '' });
+
 export const bookingService = {
   async getBookings(): Promise<Booking[]> {
     const businessId = await getBusinessId();
@@ -52,7 +53,6 @@ export const bookingService = {
     const [vendorRows, clientNames] = await Promise.all([getVendorRows(rows.map((row) => row.id)), getClientNames(rows.map((row) => row.client_id))]);
     return rows.map((row) => mapBooking(row, vendorRows.filter((v) => v.booking_id === row.id), clientNames[row.client_id] || ''));
   },
-
   async getBookingById(id: string): Promise<Booking | null> {
     const businessId = await getBusinessId();
     const { data, error } = await supabase.from('bookings').select('*').eq('id', id).eq('business_id', businessId).maybeSingle();
@@ -61,37 +61,19 @@ export const bookingService = {
     const [vendorRows, clientNames] = await Promise.all([getVendorRows([id]), getClientNames([data.client_id])]);
     return mapBooking(data, vendorRows, clientNames[data.client_id] || '');
   },
-
   async createBooking(payload: Omit<Booking, 'id' | 'createdAt' | 'remainingAmount'>): Promise<Booking> {
     const businessId = await getBusinessId();
     const totalAmount = Number(payload.totalAmount || 0);
     const advancePaid = Number(payload.advancePaid || 0);
     const { assignedVendors = [], ...bookingPayload } = payload;
-
-    // payment_status and remaining_amount are database-generated columns.
-    // Never include generated columns in INSERT payloads.
-    const { data, error } = await supabase.from('bookings').insert({
-      business_id: businessId,
-      client_id: bookingPayload.clientId,
-      event_type: bookingPayload.eventType,
-      event_date: bookingPayload.eventDate,
-      event_time: bookingPayload.eventTime || '',
-      venue: bookingPayload.venue || '',
-      guest_count: Number(bookingPayload.guestCount || 0),
-      package: bookingPayload.package || '',
-      total_amount: totalAmount,
-      advance_paid: advancePaid,
-      booking_status: bookingPayload.bookingStatus,
-      notes: bookingPayload.notes || '',
-    }).select('*').single();
+    const { data, error } = await supabase.from('bookings').insert({ business_id: businessId, client_id: bookingPayload.clientId, event_type: bookingPayload.eventType, event_date: bookingPayload.eventDate, event_time: bookingPayload.eventTime || '', venue: bookingPayload.venue || '', guest_count: Number(bookingPayload.guestCount || 0), package: bookingPayload.package || '', total_amount: totalAmount, advance_paid: advancePaid, booking_status: bookingPayload.bookingStatus, notes: bookingPayload.notes || '' }).select('*').single();
     if (error) throw error;
     if (assignedVendors.length) {
-      const { error: vendorError } = await supabase.from('booking_vendors').insert(assignedVendors.map((vendor) => ({ booking_id: data.id, vendor_id: vendor.vendorId, vendor_name: vendor.vendorName, category: vendor.category, agreed_amount: Number(vendor.agreedAmount || 0), payment_status: vendor.paymentStatus, notes: vendor.notes || '' })));
+      const { error: vendorError } = await supabase.from('booking_vendors').insert(assignedVendors.map((vendor) => ({ booking_id: data.id, ...vendorDbPayload(vendor) })));
       if (vendorError) { await supabase.from('bookings').delete().eq('id', data.id).eq('business_id', businessId); throw vendorError; }
     }
-    return mapBooking(data, assignedVendors.map((vendor) => ({ id: vendor.id, vendor_id: vendor.vendorId, vendor_name: vendor.vendorName, category: vendor.category, agreed_amount: vendor.agreedAmount, payment_status: vendor.paymentStatus, notes: vendor.notes })), bookingPayload.clientName || '');
+    return this.getBookingById(data.id) as Promise<Booking>;
   },
-
   async updateBooking(id: string, updates: Partial<Booking>): Promise<Booking> {
     const businessId = await getBusinessId();
     const current = await this.getBookingById(id);
@@ -111,20 +93,18 @@ export const bookingService = {
     if (updatesWithoutLocalFields.notes !== undefined) dbUpdates.notes = updatesWithoutLocalFields.notes || '';
     dbUpdates.total_amount = totalAmount;
     dbUpdates.advance_paid = advancePaid;
-    // payment_status is generated from the financial columns; do not update it directly.
     const { data, error } = await supabase.from('bookings').update(dbUpdates).eq('id', id).eq('business_id', businessId).select('*').single();
     if (error) throw error;
     if (assignedVendors !== undefined) {
       const { error: deleteError } = await supabase.from('booking_vendors').delete().eq('booking_id', id);
       if (deleteError) throw deleteError;
       if (assignedVendors.length) {
-        const { error: insertError } = await supabase.from('booking_vendors').insert(assignedVendors.map((vendor) => ({ booking_id: id, vendor_id: vendor.vendorId, vendor_name: vendor.vendorName, category: vendor.category, agreed_amount: Number(vendor.agreedAmount || 0), payment_status: vendor.paymentStatus, notes: vendor.notes || '' })));
+        const { error: insertError } = await supabase.from('booking_vendors').insert(assignedVendors.map((vendor) => ({ booking_id: id, ...vendorDbPayload(vendor) })));
         if (insertError) throw insertError;
       }
     }
     return this.getBookingById(data.id) as Promise<Booking>;
   },
-
   async deleteBooking(id: string): Promise<boolean> {
     const businessId = await getBusinessId();
     const { error: vendorError } = await supabase.from('booking_vendors').delete().eq('booking_id', id);
@@ -133,16 +113,14 @@ export const bookingService = {
     if (error) throw error;
     return true;
   },
-
   async assignVendorToBooking(bookingId: string, vendorData: Omit<BookingVendor, 'id'>): Promise<Booking> {
     const booking = await this.getBookingById(bookingId);
     if (!booking) throw new Error('Booking not found');
-    const { data, error } = await supabase.from('booking_vendors').insert({ booking_id: bookingId, vendor_id: vendorData.vendorId, vendor_name: vendorData.vendorName, category: vendorData.category, agreed_amount: Number(vendorData.agreedAmount || 0), payment_status: vendorData.paymentStatus, notes: vendorData.notes || '' }).select('*').single();
+    const { data, error } = await supabase.from('booking_vendors').insert({ booking_id: bookingId, ...vendorDbPayload(vendorData) }).select('*').single();
     if (error) throw error;
     if (!data) throw new Error('Vendor assignment failed');
     return this.getBookingById(bookingId) as Promise<Booking>;
   },
-
   async assignVendor(bookingId: string, vendorData: Omit<BookingVendor, 'id'>): Promise<Booking> { return this.assignVendorToBooking(bookingId, vendorData); },
   async removeVendorFromBooking(bookingId: string, bookingVendorId: string): Promise<Booking> {
     const booking = await this.getBookingById(bookingId);
