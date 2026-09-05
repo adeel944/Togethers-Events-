@@ -1,7 +1,7 @@
 export type EventType =
   | 'Mehndi' | 'Baraat' | 'Walima' | 'Nikkah' | 'Birthday' | 'Corporate' | 'Other';
 export type BookingStatus = 'Inquiry' | 'Confirmed' | 'Completed' | 'Cancelled';
-export type PaymentStatus = 'Pending' | 'Paid';
+export type PaymentStatus = 'Pending' | 'Partial' | 'Paid';
 export type VendorCategory = 'Decorator' | 'Caterer' | 'Photographer' | 'Videographer' | 'Makeup Artist' | 'Mehndi Artist' | 'DJ / Sound' | 'Florist' | 'Venue' | 'Furniture' | 'Lighting' | 'Transport' | 'Other';
 export interface Client { id:string; fullName:string; phone:string; whatsApp:string; email:string; billingAddress:string; city:string; country:string; notes?:string; createdAt:string; }
 export interface Vendor { id:string; vendorName:string; category:VendorCategory; contactPerson:string; phone:string; whatsApp:string; email:string; address:string; services:string; paymentTerms:string; notes?:string; createdAt:string; }
