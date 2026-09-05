@@ -118,26 +118,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return points;
   }, [bookings, chartMonth, range]);
 
-  const maxBooking = Math.max(1, ...chartData.map((point) => point.booking));
-  const maxExpense = Math.max(1, ...chartData.map((point) => point.expense));
+  const maxExpense = Math.max(0, ...chartData.map((point) => point.expense));
+  const chartMax = maxExpense > 0 ? maxExpense : 10000;
+  const tickCount = 5;
+  const rawStep = chartMax / tickCount;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(Math.max(rawStep, 1))));
+  const normalizedStep = rawStep / magnitude;
+  const niceMultiplier = normalizedStep <= 1 ? 1 : normalizedStep <= 2 ? 2 : normalizedStep <= 5 ? 5 : 10;
+  const paymentStep = niceMultiplier * magnitude;
+  const paymentMax = paymentStep * tickCount;
+  const paymentTicks = Array.from({ length: tickCount + 1 }, (_, index) => paymentStep * index);
+  const formatAxisAmount = (value: number) => {
+    if (value >= 1000000) return `${(value / 1000000).toFixed(value % 1000000 ? 1 : 0)}M`;
+    if (value >= 1000) return `${Math.round(value / 1000)}K`;
+    return String(Math.round(value));
+  };
   const chartTitle = range === 'month' ? `${monthNames[chartMonth.getMonth()]} ${chartMonth.getFullYear()}` : range === '3months' ? 'Last 3 Months' : 'Last 12 Months';
   const avg = bookings.length ? Math.round(bookings.reduce((sum, booking) => sum + Number(booking.totalAmount || 0), 0) / bookings.length) : 0;
   const rate = bookings.length ? Math.round((confirmedBookings / bookings.length) * 100) : 0;
 
-  // Clean ECG-inspired business line: the data remains natural, with tiny dots and only a hint of cinematic depth.
-  const buildLinePath = (key: 'booking' | 'expense') => {
+  const buildExpensePath = () => {
     if (!chartData.length) return '';
-    const max = key === 'booking' ? maxBooking : maxExpense;
     const points = chartData.map((point, index) => ({
-      x: chartData.length === 1 ? 50 : (index / (chartData.length - 1)) * 100,
-      y: 80 - (point[key] / max) * 54,
+      x: chartData.length === 1 ? 50 : 4 + (index / (chartData.length - 1)) * 94,
+      y: 86 - (point.expense / paymentMax) * 70,
     }));
-    if (points.length === 1) return `M 0 ${points[0].y} L 100 ${points[0].y}`;
+    if (points.length === 1) return `M 4 ${points[0].y} L 98 ${points[0].y}`;
     return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
   };
 
-  const bookingLinePath = buildLinePath('booking');
-  const expenseLinePath = buildLinePath('expense');
+  const expenseLinePath = buildExpensePath();
 
   return (
     <div className="space-y-6 sm:space-y-7 animate-in fade-in duration-200">
@@ -168,43 +178,40 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-4 text-[9px] font-medium"><span className="flex items-center gap-1.5 text-sky-600"><i className="w-2 h-2 rounded-full bg-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.55)]" />Bookings</span><span className="flex items-center gap-1.5 text-rose-500"><i className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.45)]" />Expenses</span></div>
+            <div className="flex items-center gap-4 text-[9px] font-medium"><span className="flex items-center gap-1.5 text-rose-500"><i className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.45)]" />Vendor Payments</span><span className="text-slate-400">Daily paid amount</span></div>
             <div className="flex items-center gap-1"><button onClick={() => setChartMonth(new Date(chartMonth.getFullYear(), chartMonth.getMonth() - 1, 1))} className="p-1.5 rounded-lg bg-white/60 border border-white/80 text-slate-500" aria-label="Previous chart month"><ChevronLeft className="w-3.5 h-3.5" /></button><button onClick={() => setChartMonth(new Date(chartMonth.getFullYear(), chartMonth.getMonth() + 1, 1))} className="p-1.5 rounded-lg bg-white/60 border border-white/80 text-slate-500" aria-label="Next chart month"><ChevronRight className="w-3.5 h-3.5" /></button></div>
           </div>
 
           <div className="relative h-[340px] overflow-hidden rounded-[22px] border border-white/70 bg-white/28 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_18px_45px_rgba(15,23,42,0.08)]">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_48%_42%,rgba(56,189,248,0.10),transparent_44%)]" />
             <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.34),transparent_42%,rgba(255,255,255,0.12))]" />
-            <div className="absolute left-4 top-4 text-[8px] tracking-[0.24em] uppercase text-slate-400">Business activity</div>
-            <div className="absolute right-4 top-4 flex items-center gap-1.5 text-[8px] tracking-[0.16em] uppercase text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.75)]" /> Live trend</div>
+            <div className="absolute left-4 top-4 text-[8px] tracking-[0.24em] uppercase text-slate-400">Payments (Rs.)</div>
+            <div className="absolute right-4 top-4 flex items-center gap-1.5 text-[8px] tracking-[0.16em] uppercase text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.65)]" /> Payment trend</div>
 
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
+            <div className="absolute left-3 top-10 bottom-7 w-9 flex flex-col justify-between text-[8px] text-slate-400 text-right tabular-nums pointer-events-none">
+              {paymentTicks.slice().reverse().map((tick) => <span key={tick}>{formatAxisAmount(tick)}</span>)}
+            </div>
+
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute left-14 right-2 top-8 bottom-6 w-auto h-auto">
               <defs>
-                <linearGradient id="glassBlue" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#38bdf8" stopOpacity="0.42" /><stop offset="48%" stopColor="#0ea5e9" stopOpacity="0.95" /><stop offset="100%" stopColor="#22d3ee" stopOpacity="0.62" /></linearGradient>
-                <linearGradient id="glassRose" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#fb7185" stopOpacity="0.34" /><stop offset="52%" stopColor="#f43f5e" stopOpacity="0.82" /><stop offset="100%" stopColor="#fb7185" stopOpacity="0.48" /></linearGradient>
-                <filter id="softBlue" x="-10%" y="-30%" width="120%" height="160%"><feGaussianBlur stdDeviation="0.8" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-                <filter id="softRose" x="-10%" y="-30%" width="120%" height="160%"><feGaussianBlur stdDeviation="0.65" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+                <linearGradient id="glassRose" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#fb7185" stopOpacity="0.45" /><stop offset="50%" stopColor="#f43f5e" stopOpacity="0.9" /><stop offset="100%" stopColor="#fb7185" stopOpacity="0.58" /></linearGradient>
+                <filter id="softRose" x="-10%" y="-30%" width="120%" height="160%"><feGaussianBlur stdDeviation="0.55" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
               </defs>
-              <g stroke="#64748b" strokeOpacity="0.11" strokeWidth="0.2" vectorEffect="non-scaling-stroke">
-                {[16,30,44,58,72,86].map((y) => <line key={`h-${y}`} x1="0" y1={y} x2="100" y2={y} />)}
-                {[5,15,25,35,45,55,65,75,85,95].map((x) => <line key={`v-${x}`} x1={x} y1="0" x2={x} y2="100" />)}
+              <g stroke="#64748b" strokeOpacity="0.10" strokeWidth="0.2" vectorEffect="non-scaling-stroke">
+                {paymentTicks.map((tick, index) => { const y = 86 - (index / tickCount) * 70; return <line key={`h-${tick}`} x1="0" y1={y} x2="100" y2={y} />; })}
+                {chartData.map((_, index) => { const x = chartData.length === 1 ? 50 : 4 + (index / (chartData.length - 1)) * 94; return <line key={`v-${index}`} x1={x} y1="16" x2={x} y2="86" strokeOpacity="0.045" />; })}
               </g>
-              <path d={bookingLinePath} fill="none" stroke="#38bdf8" strokeOpacity="0.16" strokeWidth="2.2" strokeLinecap="round" vectorEffect="non-scaling-stroke" filter="url(#softBlue)" />
-              <path d={bookingLinePath} fill="none" stroke="url(#glassBlue)" strokeWidth="0.95" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-              <path d={expenseLinePath} fill="none" stroke="#fb7185" strokeOpacity="0.13" strokeWidth="1.9" strokeLinecap="round" vectorEffect="non-scaling-stroke" filter="url(#softRose)" />
+              <line x1="0" y1="86" x2="100" y2="86" stroke="#64748b" strokeOpacity="0.18" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
+              <path d={expenseLinePath} fill="none" stroke="#fb7185" strokeOpacity="0.10" strokeWidth="1.8" strokeLinecap="round" vectorEffect="non-scaling-stroke" filter="url(#softRose)" />
               <path d={expenseLinePath} fill="none" stroke="url(#glassRose)" strokeWidth="0.8" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
               {chartData.map((point, index) => {
-                const x = chartData.length === 1 ? 50 : (index / (chartData.length - 1)) * 100;
-                const bookingY = 80 - (point.booking / maxBooking) * 54;
-                const expenseY = 80 - (point.expense / maxExpense) * 54;
-                return <g key={`${point.label}-${index}`}>
-                  <circle cx={x} cy={bookingY} r="0.9" fill="#ffffff" stroke="#0ea5e9" strokeWidth="0.55" vectorEffect="non-scaling-stroke" />
-                  <circle cx={x} cy={expenseY} r="0.8" fill="#ffffff" stroke="#f43f5e" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
-                </g>;
+                const x = chartData.length === 1 ? 50 : 4 + (index / (chartData.length - 1)) * 94;
+                const y = 86 - (point.expense / paymentMax) * 70;
+                return <circle key={`${point.label}-${index}`} cx={x} cy={y} r="0.58" fill="#fff" stroke="#f43f5e" strokeWidth="0.42" vectorEffect="non-scaling-stroke" />;
               })}
             </svg>
 
-            <div className="absolute inset-x-3 bottom-2 flex justify-between text-[8px] text-slate-500 pointer-events-none">{chartData.filter((_, index) => chartData.length <= 8 || index % Math.ceil(chartData.length / 7) === 0).map((point, index) => <span key={`${point.label}-${index}`}>{point.label}</span>)}</div>
+            <div className="absolute left-14 right-3 bottom-2 flex justify-between text-[8px] text-slate-500 pointer-events-none">{chartData.filter((_, index) => chartData.length <= 8 || index % Math.ceil(chartData.length / 7) === 0).map((point, index) => <span key={`${point.label}-${index}`}>{point.label}</span>)}</div>
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2"><div className="rounded-xl bg-sky-50/70 border border-sky-100 p-2.5"><span className="block text-[8px] uppercase tracking-wider text-sky-500">Booking volume</span><span className="block text-sm font-semibold text-sky-700 mt-0.5">{chartData.reduce((sum, point) => sum + point.booking, 0)}</span></div><div className="rounded-xl bg-rose-50/70 border border-rose-100 p-2.5"><span className="block text-[8px] uppercase tracking-wider text-rose-500">Vendor expenses</span><span className="block text-sm font-semibold text-rose-600 mt-0.5">{money(chartData.reduce((sum, point) => sum + point.expense, 0))}</span></div></div>
