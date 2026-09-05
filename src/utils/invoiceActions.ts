@@ -10,39 +10,77 @@ export const downloadInvoicePdf = async (
   elementId: string,
   invoiceNumber: string
 ): Promise<void> => {
-  const element = document.getElementById(elementId);
-  if (!element) {
+  const preview = document.getElementById(elementId);
+  if (!preview) {
     throw new Error('Invoice preview element not found');
   }
 
-  // Create canvas with high scale for crisp vector-like text rendering
-  const canvas = await html2canvas(element, {
+  // Capture the actual invoice sheet, not the surrounding preview/scroll container.
+  const invoiceElement = preview.querySelector<HTMLElement>('.print-container');
+  if (!invoiceElement) {
+    throw new Error('Invoice document element not found');
+  }
+
+  // Give the browser a frame to finish fonts/images/layout before capturing.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+  const canvas = await html2canvas(invoiceElement, {
     scale: 2,
     useCORS: true,
+    allowTaint: false,
     logging: false,
     backgroundColor: '#ffffff',
+    imageTimeout: 15000,
+    removeContainer: true,
+    scrollX: 0,
+    scrollY: -window.scrollY,
+    width: invoiceElement.scrollWidth,
+    height: invoiceElement.scrollHeight,
+    windowWidth: Math.max(document.documentElement.clientWidth, invoiceElement.scrollWidth),
   });
 
-  const imgData = canvas.toDataURL('image/png');
+  if (canvas.width === 0 || canvas.height === 0) {
+    throw new Error('Invoice rendered to an empty canvas');
+  }
+
   const pdf = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
     format: 'a4',
+    compress: true,
   });
 
-  const pdfWidth = pdf.internal.pageSize.getWidth();
-  const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
 
-  pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, Math.min(pdfHeight, 297));
+  // Keep the invoice's proportions and fit it to the A4 page width.
+  const imageWidth = pageWidth;
+  const imageHeight = (canvas.height * imageWidth) / canvas.width;
 
-  // If content is longer than 1 A4 page, add pages
-  let heightLeft = pdfHeight - 297;
-  let position = -297;
-  while (heightLeft > 0) {
-    pdf.addPage();
-    pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
-    heightLeft -= 297;
-    position -= 297;
+  const imgData = canvas.toDataURL('image/png', 1.0);
+  let remainingHeight = imageHeight;
+  let offsetY = 0;
+  let pageIndex = 0;
+
+  while (remainingHeight > 0) {
+    if (pageIndex > 0) {
+      pdf.addPage();
+    }
+
+    pdf.addImage(
+      imgData,
+      'PNG',
+      0,
+      -offsetY,
+      imageWidth,
+      imageHeight,
+      undefined,
+      'FAST'
+    );
+
+    remainingHeight -= pageHeight;
+    offsetY += pageHeight;
+    pageIndex += 1;
   }
 
   pdf.save(`Invoice-${invoiceNumber}.pdf`);
