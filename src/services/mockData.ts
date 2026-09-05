@@ -121,11 +121,100 @@ export const initialVendors: Vendor[] = [
     contactPerson: 'Chef Asif Qureshi',
     phone: '+92 300 7766554',
     whatsApp: '+92 300 7766554',
-    email: 'catering@nawabroyal.pk',
-    address: 'Circular Road, Bahawalpur',
-    services: 'Wedding menus, live BBQ, desserts, beverage counters',
-    paymentTerms: '50% advance, 50% after event',
-    notes: 'Premium Pakistani and continental catering.',
-    createdAt: '2026-07-05T10:00:00Z',
+    email: 'catering@nawabroyal.com',
+    address: 'Station Road Commercial Plaza',
+    services: 'Traditional Mughlai, Live BBQ stations, Dessert bars, Continental buffet',
+    paymentTerms: '50% advance, 50% day before event',
+    notes: 'Top tier hygiene and live copper handi presentation.',
+    createdAt: '2026-07-05T11:00:00Z',
+  },
+  {
+    id: 'ven-3',
+    vendorName: 'Lumière Visual Studios',
+    category: 'Photographer',
+    contactPerson: 'Shahmeer Khan',
+    phone: '+92 334 3322110',
+    whatsApp: '+92 334 3322110',
+    email: 'shoots@lumiere.pk',
+    address: 'Studio 12, Gulshan Avenue',
+    services: 'Cinematography, 4K Drone coverage, Teaser reels, Signature coffee table album',
+    paymentTerms: '30% booking, 40% event day, 30% on album delivery',
+    notes: 'Award-winning wedding photographer with team of 5 cinematographers.',
+    createdAt: '2026-07-10T15:00:00Z',
+  },
+  {
+    id: 'ven-4',
+    vendorName: 'Aura by Mehak Signature Salon',
+    category: 'Makeup Artist',
+    contactPerson: 'Mehak Rizvi',
+    phone: '+92 302 9900112',
+    whatsApp: '+92 302 9900112',
+    email: 'bridal@auramehak.com',
+    address: 'Defense Phase 5 Commercial',
+    services: 'Bridal HD airbrush makeup, Hair styling, Draping, Family glam packages',
+    paymentTerms: '100% advance at trial booking',
+    notes: 'Strict schedule adherence. Requires 3 hours dedicated bridal slot.',
+    createdAt: '2026-07-15T09:00:00Z',
+  },
+  {
+    id: 'ven-5',
+    vendorName: 'SoundWave Acoustic & Lights',
+    category: 'DJ / Sound',
+    contactPerson: 'DJ Danial',
+    phone: '+92 315 4433221',
+    whatsApp: '+92 315 4433221',
+    email: 'danial@soundwave.pk',
+    address: 'Media Town, Block C',
+    services: 'Concert grade line-array sound, Intelligent beam lighting, Cold pyro fountains, Fog smoke',
+    paymentTerms: '50% advance, 50% post sound-check',
+    notes: 'Licensed for outdoor sound setups and wedding entrances.',
+    createdAt: '2026-07-20T14:30:00Z',
+  },
+];
+
+export const initialBookings: Booking[] = [
+  {
+    id: 'bok-1', clientId: 'cli-1', clientName: 'Sarah & Farhan Ahmed', eventType: 'Baraat', eventDate: '2026-09-18', eventTime: '07:30 PM', venue: 'Serena Marquee, Grand Ballroom', guestCount: 500, package: 'Royal Heritage Signature Package', totalAmount: 1850000, advancePaid: 800000, remainingAmount: 1050000, bookingStatus: 'Confirmed', paymentStatus: 'Pending', notes: 'Rose gold themed stage with 40-ft floral backdrop. Live shehnai welcome at entry gate.',
+    assignedVendors: [
+      { id: 'bv-1', vendorId: 'ven-1', vendorName: 'Royal Flora & Decors', category: 'Decorator', agreedAmount: 550000, paymentStatus: 'Pending', notes: 'Includes floral tunnel and centerpieces' },
+      { id: 'bv-2', vendorId: 'ven-2', vendorName: 'Nawab Royal Catering', category: 'Caterer', agreedAmount: 900000, paymentStatus: 'Pending', notes: '6 mutton and chicken dishes with live jalebi station' },
+      { id: 'bv-3', vendorId: 'ven-3', vendorName: 'Lumière Visual Studios', category: 'Photographer', agreedAmount: 250000, paymentStatus: 'Paid', notes: 'Full day coverage with 2 cameras + 1 drone' },
+    ],
+    createdAt: '2026-08-11T11:00:00Z',
+  },
+  {
+    id: 'bok-2', clientId: 'cli-2', clientName: 'Ayesha & Bilal Malik', eventType: 'Walima', eventDate: '2026-09-24', eventTime: '08:00 PM', venue: 'Pearl Continental Grand Hall', guestCount: 650, package: 'Emerald Imperial Package', totalAmount: 2200000, advancePaid: 1100000, remainingAmount: 1100000, bookingStatus: 'Confirmed', paymentStatus: 'Pending', notes: 'Mirrored aisle with cascading white wisteria. Groom wants special spotlight entry.',
+    assignedVendors: [
+      { id: 'bv-4', vendorId: 'ven-1', vendorName: 'Royal Flora & Decors', category: 'Decorator', agreedAmount: 680000, paymentStatus: 'Pending' },
+      { id: 'bv-5', vendorId: 'ven-5', vendorName: 'SoundWave Acoustic & Lights', category: 'DJ / Sound', agreedAmount: 140000, paymentStatus: 'Pending' },
+    ],
+    createdAt: '2026-08-16T14:00:00Z',
+  },
+  {
+    id: 'bok-3', clientId: 'cli-3', clientName: 'Dr. Tariq & Dr. Rehana', eventType: 'Nikkah', eventDate: '2026-10-02', eventTime: '05:00 PM', venue: 'Noor Mahal Gardens', guestCount: 200, package: 'Bespoke Twilight Intimate Nikkah', totalAmount: 950000, advancePaid: 950000, remainingAmount: 0, bookingStatus: 'Confirmed', paymentStatus: 'Paid', notes: 'White and emerald green aesthetic. Nikkah backdrop on water fountain deck.', assignedVendors: [{ id: 'bv-6', vendorId: 'ven-1', vendorName: 'Royal Flora & Decors', category: 'Decorator', agreedAmount: 320000, paymentStatus: 'Paid' }], createdAt: '2026-08-21T10:00:00Z',
+  },
+  {
+    id: 'bok-4', clientId: 'cli-4', clientName: 'Apex Global Enterprises', eventType: 'Corporate', eventDate: '2026-10-15', eventTime: '06:30 PM', venue: 'Marriott Executive Pavilion', guestCount: 350, package: 'Corporate Summit & Gala Dinner', totalAmount: 1400000, advancePaid: 0, remainingAmount: 1400000, bookingStatus: 'Inquiry', paymentStatus: 'Pending', notes: 'Formal award ceremony with corporate keynote stage, LED walls and press media pen.', assignedVendors: [], createdAt: '2026-08-26T16:00:00Z',
+  },
+];
+
+export const initialInvoices: Invoice[] = [
+  {
+    id: 'inv-1', invoiceNumber: 'TE-1001', bookingId: 'bok-1', clientId: 'cli-1', clientName: 'Sarah & Farhan Ahmed', clientPhone: '+92 321 4455667', clientWhatsApp: '+92 321 4455667', clientEmail: 'sarah.farhan@gmail.com', billingAddress: 'House 42, Sector F, Gulberg Colony, Lahore', eventType: 'Baraat', eventDate: '2026-09-18', venue: 'Serena Marquee, Grand Ballroom', issueDate: '2026-08-12', dueDate: '2026-09-15',
+    items: [
+      { id: 'item-1', description: 'Baraat Royal Stage & Venue Floral Transformation (Imported Florals & Aisle)', quantity: 1, unitPrice: 650000, total: 650000 },
+      { id: 'item-2', description: 'Mughlai Royal Catering & Live Service for 500 Guests (Per Head Setup)', quantity: 500, unitPrice: 1900, total: 950000 },
+      { id: 'item-3', description: 'Lumière Signature Cinema & 4K Drone Photography Package', quantity: 1, unitPrice: 250000, total: 250000 },
+    ],
+    subtotal: 1850000, discount: 0, tax: 0, totalAmount: 1850000, advancePaid: 800000, remainingBalance: 1050000, paymentStatus: 'Pending', notes: 'Stage installation commences at 10:00 AM on event day.', termsAndConditions: '1. A non-refundable advance of 30% is required to secure the event date.\n2. Remaining balance must be settled 24 hours prior to event commencement.', templateId: 'modern', createdAt: '2026-08-12T11:30:00Z',
+  },
+  {
+    id: 'inv-2', invoiceNumber: 'TE-1002', bookingId: 'bok-3', clientId: 'cli-3', clientName: 'Dr. Tariq & Dr. Rehana', clientPhone: '+92 301 5567890', clientWhatsApp: '+92 301 5567890', clientEmail: 'tariq.rehana@medcare.com', billingAddress: 'Street 9, Cantt Area, Multan', eventType: 'Nikkah', eventDate: '2026-10-02', venue: 'Noor Mahal Gardens', issueDate: '2026-08-22', dueDate: '2026-09-20',
+    items: [
+      { id: 'item-4', description: 'Bespoke Twilight Nikkah Gazebo, Fountain Mirror Stage & White Floral Canopy', quantity: 1, unitPrice: 420000, total: 420000 },
+      { id: 'item-5', description: 'Gourmet High Tea & Live Royal Kebab Live Buffet (200 Guests)', quantity: 200, unitPrice: 2150, total: 430000 },
+      { id: 'item-6', description: 'Traditional Live Acoustic & Shehnai Ensemble', quantity: 1, unitPrice: 100000, total: 100000 },
+    ],
+    subtotal: 950000, discount: 0, tax: 0, totalAmount: 950000, advancePaid: 950000, remainingBalance: 0, paymentStatus: 'Paid', notes: 'Paid in full via direct bank transfer.', termsAndConditions: '1. All charges inclusive of setup and breakdown crew.\n2. Security clearances for historical venue handled by Together Events.', templateId: 'elegant', createdAt: '2026-08-22T10:15:00Z',
   },
 ];
