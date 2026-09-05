@@ -55,17 +55,12 @@ export const InvoicePreviewView: React.FC<InvoicePreviewViewProps> = ({
   onBack,
   onUpdateSettings,
 }) => {
-  const [selectedTemplate, setSelectedTemplate] = useState<string>(
-    invoice.templateId || settings.defaultTemplate || 'modern'
-  );
+  const [selectedTemplate, setSelectedTemplate] = useState<string>(invoice.templateId || settings.defaultTemplate || 'modern');
   const [isDownloading, setIsDownloading] = useState(false);
   const [localSettings, setLocalSettings] = useState<InvoiceSettings>({ ...settings });
 
   const handleToggle = (key: keyof InvoiceSettings) => {
-    const updated = {
-      ...localSettings,
-      [key]: !localSettings[key as keyof InvoiceSettings],
-    };
+    const updated = { ...localSettings, [key]: !localSettings[key as keyof InvoiceSettings] };
     setLocalSettings(updated);
     onUpdateSettings(updated);
   };
@@ -104,10 +99,9 @@ export const InvoicePreviewView: React.FC<InvoicePreviewViewProps> = ({
             <p className="text-xs text-slate-500">{invoice.clientName} • {invoice.eventType} ({invoice.eventDate})</p>
           </div>
         </div>
-
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          <button type="button" onClick={() => { const url = generateWhatsAppUrl(invoice, profile); window.open(url, '_blank'); }} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-emerald-50 text-emerald-700 text-xs font-semibold shadow-2xs transition-colors" title="Share invoice summary on WhatsApp"><Share2 className="w-3.5 h-3.5" /><span>WhatsApp</span></button>
-          <button type="button" onClick={() => { const mailto = generateEmailMailto(invoice, profile); window.location.href = mailto; }} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-blue-50 text-blue-700 text-xs font-semibold shadow-2xs transition-colors" title="Compose Email to client"><Mail className="w-3.5 h-3.5" /><span>Email</span></button>
+          <button type="button" onClick={() => { const url = generateWhatsAppUrl(invoice, profile, localSettings); window.open(url, '_blank'); }} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-emerald-50 text-emerald-700 text-xs font-semibold shadow-2xs transition-colors" title="Share invoice summary on WhatsApp"><Share2 className="w-3.5 h-3.5" /><span>WhatsApp</span></button>
+          <button type="button" onClick={() => { const mailto = generateEmailMailto(invoice, profile, localSettings); window.location.href = mailto; }} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-blue-50 text-blue-700 text-xs font-semibold shadow-2xs transition-colors" title="Compose Email to client"><Mail className="w-3.5 h-3.5" /><span>Email</span></button>
           <button type="button" onClick={handleDownload} disabled={isDownloading} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold shadow-2xs transition-colors disabled:opacity-50"><Download className="w-3.5 h-3.5 text-slate-600" /><span>{isDownloading ? 'Generating...' : 'Download PDF'}</span></button>
           <button type="button" onClick={printInvoice} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition-colors"><Printer className="w-3.5 h-3.5" /><span>Print Invoice</span></button>
         </div>
