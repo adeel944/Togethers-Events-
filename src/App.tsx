@@ -127,7 +127,6 @@ export default function App() {
       const { invoice: created, booking } = await createInvoiceWithBooking(invoiceData);
       if (booking) await refreshBookings(booking); else await refreshBookings();
       setInvoices(await invoiceService.getInvoices());
-      setPreviewInvoice(created);
       return created;
     } catch (error) {
       console.error('Invoice save failed:', error);
