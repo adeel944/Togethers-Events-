@@ -138,8 +138,6 @@ export const SalesGraph: React.FC<SalesGraphProps> = ({ bookings = [], expenses 
       });
     }
 
-    const years = new Set<number>();
-    allDates.forEach((date) => years.add(Number(date.slice(0, 4))));
     const currentYear = new Date().getFullYear();
     return Array.from({ length: 5 }, (_, index) => currentYear - 4 + index).map((year) => {
       const inYear = (date: string) => Number(date.slice(0, 4)) === year;
@@ -171,76 +169,79 @@ export const SalesGraph: React.FC<SalesGraphProps> = ({ bookings = [], expenses 
   const hasData = allValues.some((value) => value !== 0);
 
   return (
-    <div className="glass-panel w-full overflow-hidden px-4 sm:px-6 pt-5 pb-3 relative">
-      <div className="absolute inset-x-0 top-0 h-px bg-white/80" aria-hidden="true" />
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 relative z-[1]">
-        <h2 className="text-[20px] sm:text-[21px] font-normal text-[#0f172a] tracking-[-0.01em]">Sales Graph</h2>
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3 sm:gap-4 text-[11px] sm:text-xs text-slate-500">
-            <span className="flex items-center gap-1.5"><i className="w-5 h-[2px] rounded-full bg-[#0f172a]" />Revenue</span>
-            <span className="flex items-center gap-1.5"><i className="w-5 h-[2px] rounded-full bg-[#64748b]" />Vendor</span>
-            <span className="flex items-center gap-1.5"><i className="w-5 h-[2px] rounded-full bg-[#d97706]" />Expense</span>
-            <span className="flex items-center gap-1.5"><i className="w-5 h-[2px] rounded-full bg-[#15803d]" />Profit</span>
-          </div>
-          <div className="flex items-center gap-5 sm:gap-6 text-[15px] sm:text-[16px] leading-none shrink-0">
-            {(['Daily', 'Weekly', 'Monthly', 'Yearly'] as Range[]).map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setRange(item)}
-                className={`relative pb-3 font-normal transition-colors text-[#0f172a] ${range === item ? 'text-[#0f172a]' : 'text-slate-400'}`}
-              >
-                {item}
-                {range === item && <span className="absolute left-0 right-0 -bottom-[1px] h-[2px] bg-[#0f172a] rounded-full" />}
-              </button>
-            ))}
+    <section className="glass-panel relative w-full overflow-hidden rounded-[28px] p-[1px]">
+      <div className="absolute inset-0 rounded-[28px] bg-white/10 pointer-events-none" aria-hidden="true" />
+      <div className="relative rounded-[27px] bg-white/[0.30] backdrop-blur-[18px] backdrop-saturate-[125%] border border-white/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.70),0_14px_34px_-24px_rgba(15,23,42,0.20)] px-4 sm:px-6 pt-5 pb-3">
+        <div className="absolute left-6 right-6 top-0 h-px bg-white/80" aria-hidden="true" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <h2 className="text-[20px] sm:text-[21px] font-normal text-[#0f172a] tracking-[-0.01em]">Sales Graph</h2>
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3 sm:gap-4 text-[11px] sm:text-xs text-slate-500">
+              <span className="flex items-center gap-1.5"><i className="w-5 h-[2px] rounded-full bg-[#0f172a]" />Revenue</span>
+              <span className="flex items-center gap-1.5"><i className="w-5 h-[2px] rounded-full bg-[#64748b]" />Vendor</span>
+              <span className="flex items-center gap-1.5"><i className="w-5 h-[2px] rounded-full bg-[#d97706]" />Expense</span>
+              <span className="flex items-center gap-1.5"><i className="w-5 h-[2px] rounded-full bg-[#15803d]" />Profit</span>
+            </div>
+            <div className="flex items-center gap-5 sm:gap-6 text-[15px] sm:text-[16px] leading-none shrink-0">
+              {(['Daily', 'Weekly', 'Monthly', 'Yearly'] as Range[]).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => setRange(item)}
+                  className={`relative pb-3 font-normal transition-colors ${range === item ? 'text-[#0f172a]' : 'text-slate-400'}`}
+                >
+                  {item}
+                  {range === item && <span className="absolute left-0 right-0 -bottom-[1px] h-[2px] bg-[#0f172a] rounded-full" />}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+
+        <div className="w-full overflow-hidden rounded-[22px] border border-white/35 bg-white/[0.12]">
+          <svg viewBox={`0 0 ${chartW} ${chartH}`} className="block w-full h-[320px] sm:h-[370px]" preserveAspectRatio="none" role="img" aria-label="Sales graph with revenue, vendor payments, expenses and profit">
+            {yTicks.map((value, index) => {
+              const y = yAt(value);
+              return <g key={`y-${index}`}>
+                <line x1={plotLeft} x2={chartW - plotRight} y1={y} y2={y} stroke={COLORS.grid} strokeWidth="1" />
+                <text x={plotLeft - 12} y={y + 4} textAnchor="end" fontSize="11" fill={COLORS.text}>{moneyLabel(value, currencySymbol)}</text>
+              </g>;
+            })}
+
+            {minValue < 0 && (
+              <line x1={plotLeft} x2={chartW - plotRight} y1={yAt(0)} y2={yAt(0)} stroke="rgba(148, 163, 184, 0.40)" strokeWidth="1.2" />
+            )}
+
+            {visibleLabels.map((point, visibleIndex) => {
+              const originalIndex = points.indexOf(point);
+              const x = xAt(originalIndex);
+              return <g key={`x-${point.label}-${visibleIndex}`}>
+                <line x1={x} x2={x} y1={plotTop} y2={plotTop + plotH} stroke={COLORS.grid} strokeWidth="1" />
+                <text transform={`translate(${x - 2},${plotTop + plotH + 20}) rotate(-55)`} textAnchor="end" fontSize="10.5" fill={COLORS.text}>{point.label}</text>
+              </g>;
+            })}
+
+            <path d={makePath('revenue')} fill="none" stroke={COLORS.revenue} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+            <path d={makePath('vendor')} fill="none" stroke={COLORS.vendor} strokeWidth="1.9" strokeDasharray="7 5" strokeLinecap="round" strokeLinejoin="round" />
+            <path d={makePath('expense')} fill="none" stroke={COLORS.expense} strokeWidth="1.9" strokeDasharray="3 4" strokeLinecap="round" strokeLinejoin="round" />
+            <path d={makePath('profit')} fill="none" stroke={COLORS.profit} strokeWidth="2" strokeDasharray="10 4" strokeLinecap="round" strokeLinejoin="round" />
+
+            {(['revenue', 'vendor', 'expense', 'profit'] as const).map((key) => (
+              <g key={key}>
+                {points.map((point, index) => {
+                  const value = point[key];
+                  if (value === 0 && key !== 'profit') return null;
+                  return <circle key={`${key}-${point.label}-${index}`} cx={xAt(index)} cy={yAt(value)} r="2.1" fill="rgba(255,255,255,0.92)" stroke={COLORS[key]} strokeWidth="1.3" />;
+                })}
+              </g>
+            ))}
+
+            {!hasData && (
+              <text x={chartW / 2} y={plotTop + plotH / 2} textAnchor="middle" fontSize="13" fill={COLORS.text}>No financial activity recorded yet</text>
+            )}
+          </svg>
+        </div>
       </div>
-
-      <div className="w-full overflow-hidden rounded-[20px] bg-white/10">
-        <svg viewBox={`0 0 ${chartW} ${chartH}`} className="block w-full h-[320px] sm:h-[370px]" preserveAspectRatio="none" role="img" aria-label="Sales graph with revenue, vendor payments, expenses and profit">
-          {yTicks.map((value, index) => {
-            const y = yAt(value);
-            return <g key={`y-${index}`}>
-              <line x1={plotLeft} x2={chartW - plotRight} y1={y} y2={y} stroke={COLORS.grid} strokeWidth="1" />
-              <text x={plotLeft - 12} y={y + 4} textAnchor="end" fontSize="11" fill={COLORS.text}>{moneyLabel(value, currencySymbol)}</text>
-            </g>;
-          })}
-
-          {minValue < 0 && (
-            <line x1={plotLeft} x2={chartW - plotRight} y1={yAt(0)} y2={yAt(0)} stroke="rgba(148, 163, 184, 0.40)" strokeWidth="1.2" />
-          )}
-
-          {visibleLabels.map((point, visibleIndex) => {
-            const originalIndex = points.indexOf(point);
-            const x = xAt(originalIndex);
-            return <g key={`x-${point.label}-${visibleIndex}`}>
-              <line x1={x} x2={x} y1={plotTop} y2={plotTop + plotH} stroke={COLORS.grid} strokeWidth="1" />
-              <text transform={`translate(${x - 2},${plotTop + plotH + 20}) rotate(-55)`} textAnchor="end" fontSize="10.5" fill={COLORS.text}>{point.label}</text>
-            </g>;
-          })}
-
-          <path d={makePath('revenue')} fill="none" stroke={COLORS.revenue} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-          <path d={makePath('vendor')} fill="none" stroke={COLORS.vendor} strokeWidth="1.9" strokeDasharray="7 5" strokeLinecap="round" strokeLinejoin="round" />
-          <path d={makePath('expense')} fill="none" stroke={COLORS.expense} strokeWidth="1.9" strokeDasharray="3 4" strokeLinecap="round" strokeLinejoin="round" />
-          <path d={makePath('profit')} fill="none" stroke={COLORS.profit} strokeWidth="2" strokeDasharray="10 4" strokeLinecap="round" strokeLinejoin="round" />
-
-          {(['revenue', 'vendor', 'expense', 'profit'] as const).map((key) => (
-            <g key={key}>
-              {points.map((point, index) => {
-                const value = point[key];
-                if (value === 0 && key !== 'profit') return null;
-                return <circle key={`${key}-${point.label}-${index}`} cx={xAt(index)} cy={yAt(value)} r="2.1" fill="rgba(255,255,255,0.92)" stroke={COLORS[key]} strokeWidth="1.3" />;
-              })}
-            </g>
-          ))}
-
-          {!hasData && (
-            <text x={chartW / 2} y={plotTop + plotH / 2} textAnchor="middle" fontSize="13" fill={COLORS.text}>No financial activity recorded yet</text>
-          )}
-        </svg>
-      </div>
-    </div>
+    </section>
   );
 };
