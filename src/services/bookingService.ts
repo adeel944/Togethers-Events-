@@ -65,12 +65,11 @@ export const bookingService = {
     const businessId = await getBusinessId();
     const totalAmount = Number(payload.totalAmount || 0);
     const advancePaid = Number(payload.advancePaid || 0);
-    const { assignedVendors = {}, ...bookingPayload } = payload;
+    const { assignedVendors = [], ...bookingPayload } = payload;
     const { data, error } = await supabase.from('bookings').insert({ business_id: businessId, client_id: bookingPayload.clientId, event_type: bookingPayload.eventType, event_date: bookingPayload.eventDate, event_time: bookingPayload.eventTime || '', venue: bookingPayload.venue || '', guest_count: Number(bookingPayload.guestCount || 0), package: bookingPayload.package || '', total_amount: totalAmount, advance_paid: advancePaid, booking_status: bookingPayload.bookingStatus, notes: bookingPayload.notes || '' }).select('*').single();
     if (error) throw error;
-    const vendorList = Array.isArray(assignedVendors) ? assignedVendors : [];
-    if (vendorList.length) {
-      const { error: vendorError } = await supabase.from('booking_vendors').insert(vendorList.map((vendor) => ({ business_id: businessId, booking_id: data.id, ...vendorDbPayload(vendor) })));
+    if (assignedVendors.length) {
+      const { error: vendorError } = await supabase.from('booking_vendors').insert(assignedVendors.map((vendor) => ({ business_id: businessId, booking_id: data.id, ...vendorDbPayload(vendor) })));
       if (vendorError) { await supabase.from('bookings').delete().eq('id', data.id).eq('business_id', businessId); throw vendorError; }
     }
     return this.getBookingById(data.id) as Promise<Booking>;
