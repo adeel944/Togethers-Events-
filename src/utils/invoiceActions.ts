@@ -48,13 +48,6 @@ const sanitizeComputedValue = (property: string, value: string, computed: CSSSty
   return null;
 };
 
-/**
- * Build the invoice in a desktop-width iframe and freeze ALL computed styles
- * as legacy inline CSS. This keeps the successful desktop layout while making
- * html2canvas completely independent from Tailwind's oklab()/oklch() values.
- * Because the computed styles are obtained inside the 896px iframe, mobile
- * responsive styles are never copied into the PDF.
- */
 const buildDesktopInvoice = async (source: HTMLElement, doc: Document, win: Window, width: number) => {
   const clone = source.cloneNode(true) as HTMLElement;
   clone.removeAttribute('id');
@@ -78,6 +71,9 @@ const buildDesktopInvoice = async (source: HTMLElement, doc: Document, win: Wind
   await waitForInvoiceAssets(clone, doc);
   await nextFrame(win);
 
+  // Freeze the desktop computed layout so responsive/mobile rules cannot
+  // change the PDF, while converting every modern color function to a legacy
+  // color that html2canvas can parse safely.
   const nodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
   for (const node of nodes) {
     const computed = win.getComputedStyle(node);
@@ -118,6 +114,18 @@ const buildDesktopInvoice = async (source: HTMLElement, doc: Document, win: Wind
       const value = node.getAttribute(attribute);
       if (value && unsupportedColorPattern.test(value)) node.setAttribute(attribute, toLegacyColor(value));
     }
+  }
+
+  // Prevent any descendant from extending the capture area horizontally.
+  // This is important for invoice tables/long text on desktop and mobile.
+  for (const node of [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))]) {
+    node.style.maxWidth = '100%';
+    node.style.boxSizing = 'border-box';
+    if (node.tagName === 'TABLE') {
+      node.style.width = '100%';
+      node.style.minWidth = '0';
+    }
+    if (node.tagName === 'IMG') node.style.maxWidth = '100%';
   }
 
   clone.style.position = 'static';
@@ -170,9 +178,11 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
     const isolated = await buildDesktopInvoice(invoiceSheet, isolatedDocument, isolatedWindow, DESKTOP_CSS_WIDTH);
     await nextFrame(isolatedWindow);
 
-    const height = Math.max(1, Math.ceil(isolated.scrollHeight), Math.ceil(isolated.getBoundingClientRect().height));
+    const rect = isolated.getBoundingClientRect();
+    const height = Math.max(1, Math.ceil(isolated.scrollHeight), Math.ceil(rect.height));
     isolated.style.height = `${height}px`;
     isolated.style.minHeight = `${height}px`;
+    isolated.style.overflow = 'visible';
     await nextFrame(isolatedWindow);
 
     const canvas = await html2canvas(isolated, {
@@ -210,20 +220,27 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const cssPxToMm = 25.4 / 96;
-  const maxWidthMm = pageWidth - 4;
+  const sidePaddingMm = 4;
+  const maxWidthMm = pageWidth - sidePaddingMm * 2;
   const naturalWidthMm = cssWidth * cssPxToMm;
   const scale = Math.min(1, maxWidthMm / naturalWidthMm);
   const imageWidthMm = naturalWidthMm * scale;
   const imageHeightMm = cssHeight * cssPxToMm * scale;
-  const leftMargin = (pageWidth - imageWidthMm) / 2;
+  const leftMargin = Math.max(0, (pageWidth - imageWidthMm) / 2);
+
+  // The canvas already represents the complete invoice width. Never crop it
+  // horizontally; only split the image vertically when it needs more than one
+  // A4 page.
+  const imageData = canvas.toDataURL('image/jpeg', 0.95);
 
   if (imageHeightMm <= pageHeight) {
-    pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', leftMargin, 0, imageWidthMm, imageHeightMm, undefined, 'FAST');
+    pdf.addImage(imageData, 'JPEG', leftMargin, 0, imageWidthMm, imageHeightMm, undefined, 'FAST');
   } else {
     const pageCssHeight = pageHeight / cssPxToMm / scale;
     const pageCanvasHeight = Math.max(1, Math.floor(pageCssHeight * 2));
     let offsetY = 0;
     let pageIndex = 0;
+
     while (offsetY < canvas.height) {
       const sliceHeight = Math.min(pageCanvasHeight, canvas.height - offsetY);
       const pageCanvas = document.createElement('canvas');
@@ -234,13 +251,16 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
       ctx.drawImage(canvas, 0, offsetY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+
       if (pageIndex > 0) pdf.addPage();
       const sliceHeightMm = (sliceHeight / 2) * cssPxToMm * scale;
       pdf.addImage(pageCanvas.toDataURL('image/jpeg', 0.95), 'JPEG', leftMargin, 0, imageWidthMm, sliceHeightMm, undefined, 'FAST');
+
       offsetY += sliceHeight;
       pageIndex += 1;
     }
   }
+
   pdf.save(getSafeFilename(invoiceNumber));
 };
 
