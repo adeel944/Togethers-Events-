@@ -101,19 +101,22 @@ const buildIsolatedInvoice = (source: HTMLElement) => {
 const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
   await waitForInvoiceAssets(invoiceSheet);
   await nextFrame();
-  const sourceRect = invoiceSheet.getBoundingClientRect();
-  const width = Math.max(1, Math.round(sourceRect.width || invoiceSheet.scrollWidth || 794));
+
+  // Always render the invoice at the same fixed CSS width used by an A4 sheet.
+  // This prevents mobile's narrow viewport from changing the PDF's typography/layout.
+  const A4_CSS_WIDTH = 794;
   const isolated = buildIsolatedInvoice(invoiceSheet);
-  isolated.style.width = `${width}px`;
-  isolated.style.minWidth = `${width}px`;
-  isolated.style.maxWidth = `${width}px`;
+  isolated.style.width = `${A4_CSS_WIDTH}px`;
+  isolated.style.minWidth = `${A4_CSS_WIDTH}px`;
+  isolated.style.maxWidth = `${A4_CSS_WIDTH}px`;
+  isolated.style.flex = 'none';
 
   const iframe = document.createElement('iframe');
   iframe.setAttribute('aria-hidden', 'true');
   iframe.style.position = 'fixed';
   iframe.style.left = '-100000px';
   iframe.style.top = '0';
-  iframe.style.width = `${width}px`;
+  iframe.style.width = `${A4_CSS_WIDTH}px`;
   iframe.style.height = '1px';
   iframe.style.border = '0';
   iframe.style.opacity = '0';
@@ -131,8 +134,8 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
     isolatedDocument.documentElement.style.padding = '0';
     isolatedDocument.body.style.margin = '0';
     isolatedDocument.body.style.padding = '0';
-    isolatedDocument.body.style.width = `${width}px`;
-    isolatedDocument.body.style.minWidth = `${width}px`;
+    isolatedDocument.body.style.width = `${A4_CSS_WIDTH}px`;
+    isolatedDocument.body.style.minWidth = `${A4_CSS_WIDTH}px`;
     isolatedDocument.body.style.background = '#ffffff';
     isolatedDocument.body.style.overflow = 'visible';
     isolatedDocument.body.appendChild(isolated);
@@ -146,9 +149,9 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
 
     const canvas = await html2canvas(isolated, {
       scale: 2,
-      width,
+      width: A4_CSS_WIDTH,
       height,
-      windowWidth: width,
+      windowWidth: A4_CSS_WIDTH,
       windowHeight: Math.max(height, 1000),
       x: 0, y: 0, scrollX: 0, scrollY: 0,
       backgroundColor: '#ffffff',
@@ -156,7 +159,7 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
       removeContainer: true, foreignObjectRendering: true,
     });
     if (!canvas.width || !canvas.height) throw new Error('Could not render invoice for PDF export.');
-    return { canvas, cssWidth: width, cssHeight: height };
+    return { canvas, cssWidth: A4_CSS_WIDTH, cssHeight: height };
   } finally {
     iframe.remove();
   }
