@@ -15,7 +15,7 @@ const COLORS = {
   vendor: '#64748b',
   expense: '#d97706',
   profit: '#15803d',
-  grid: '#e2e8f0',
+  grid: 'rgba(148, 163, 184, 0.22)',
   text: '#64748b',
 };
 const MAX_DAILY_POINTS = 365;
@@ -171,8 +171,9 @@ export const SalesGraph: React.FC<SalesGraphProps> = ({ bookings = [], expenses 
   const hasData = allValues.some((value) => value !== 0);
 
   return (
-    <div className="w-full bg-white border border-slate-200 rounded-[4px] px-4 sm:px-6 pt-5 pb-3 shadow-none">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+    <div className="glass-panel w-full overflow-hidden px-4 sm:px-6 pt-5 pb-3 relative">
+      <div className="absolute inset-x-0 top-0 h-px bg-white/80" aria-hidden="true" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 relative z-[1]">
         <h2 className="text-[20px] sm:text-[21px] font-normal text-[#0f172a] tracking-[-0.01em]">Sales Graph</h2>
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3 sm:gap-4 text-[11px] sm:text-xs text-slate-500">
@@ -197,7 +198,7 @@ export const SalesGraph: React.FC<SalesGraphProps> = ({ bookings = [], expenses 
         </div>
       </div>
 
-      <div className="w-full overflow-hidden">
+      <div className="w-full overflow-hidden rounded-[20px] bg-white/10">
         <svg viewBox={`0 0 ${chartW} ${chartH}`} className="block w-full h-[320px] sm:h-[370px]" preserveAspectRatio="none" role="img" aria-label="Sales graph with revenue, vendor payments, expenses and profit">
           {yTicks.map((value, index) => {
             const y = yAt(value);
@@ -208,7 +209,7 @@ export const SalesGraph: React.FC<SalesGraphProps> = ({ bookings = [], expenses 
           })}
 
           {minValue < 0 && (
-            <line x1={plotLeft} x2={chartW - plotRight} y1={yAt(0)} y2={yAt(0)} stroke="#cbd5e1" strokeWidth="1.2" />
+            <line x1={plotLeft} x2={chartW - plotRight} y1={yAt(0)} y2={yAt(0)} stroke="rgba(148, 163, 184, 0.40)" strokeWidth="1.2" />
           )}
 
           {visibleLabels.map((point, visibleIndex) => {
@@ -230,7 +231,7 @@ export const SalesGraph: React.FC<SalesGraphProps> = ({ bookings = [], expenses 
               {points.map((point, index) => {
                 const value = point[key];
                 if (value === 0 && key !== 'profit') return null;
-                return <circle key={`${key}-${point.label}-${index}`} cx={xAt(index)} cy={yAt(value)} r="2.1" fill="white" stroke={COLORS[key]} strokeWidth="1.3" />;
+                return <circle key={`${key}-${point.label}-${index}`} cx={xAt(index)} cy={yAt(value)} r="2.1" fill="rgba(255,255,255,0.92)" stroke={COLORS[key]} strokeWidth="1.3" />;
               })}
             </g>
           ))}
