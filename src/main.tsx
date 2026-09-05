@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import AuthGate from './components/auth/AuthGate';
+import { NavigationHistoryBridge } from './components/common/NavigationHistoryBridge';
 import { PwaInstallPrompt } from './components/common/PwaInstallPrompt';
 import './index.css';
 
@@ -15,6 +16,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthGate />
+    <NavigationHistoryBridge />
     <PwaInstallPrompt />
   </StrictMode>
 );
