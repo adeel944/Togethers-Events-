@@ -6,84 +6,133 @@ export const printInvoice = () => {
   window.print();
 };
 
-const normalizeCssColor = (value: string): string => {
-  if (!value) return value;
-  const trimmed = value.trim();
-  if (/^(rgb|rgba|hsl|hsla|hex|transparent|currentcolor|inherit|initial|unset)/i.test(trimmed)) {
-    return trimmed;
+const copyComputedStyles = (source: Element, target: Element): void => {
+  const sourceStyles = getComputedStyle(source);
+  const targetStyle = (target as HTMLElement).style;
+
+  for (let i = 0; i < sourceStyles.length; i += 1) {
+    const property = sourceStyles.item(i);
+    const value = sourceStyles.getPropertyValue(property);
+    if (value) {
+      targetStyle.setProperty(property, value);
+    }
   }
 
-  const probe = document.createElement('span');
-  probe.style.color = trimmed;
-  if (!probe.style.color) return trimmed;
+  if (source instanceof HTMLElement && target instanceof HTMLElement) {
+    const sourceBefore = getComputedStyle(source, '::before');
+    const sourceAfter = getComputedStyle(source, '::after');
 
-  document.body.appendChild(probe);
-  const resolved = getComputedStyle(probe).color;
-  probe.remove();
-  return resolved || trimmed;
+    if (sourceBefore.content && sourceBefore.content !== 'none') {
+      const before = document.createElement('span');
+      before.textContent = sourceBefore.content.replace(/^['"]|['"]$/g, '');
+      before.style.setProperty('display', sourceBefore.display);
+      before.style.setProperty('color', sourceBefore.color);
+      before.style.setProperty('background-color', sourceBefore.backgroundColor);
+      before.style.setProperty('font', sourceBefore.font);
+      before.style.setProperty('position', sourceBefore.position);
+      before.style.setProperty('width', sourceBefore.width);
+      before.style.setProperty('height', sourceBefore.height);
+      before.style.setProperty('margin', sourceBefore.margin);
+      before.style.setProperty('padding', sourceBefore.padding);
+      before.style.setProperty('border', sourceBefore.border);
+      before.style.setProperty('border-radius', sourceBefore.borderRadius);
+      before.style.setProperty('box-sizing', sourceBefore.boxSizing);
+      before.style.setProperty('text-align', sourceBefore.textAlign);
+      before.style.setProperty('white-space', sourceBefore.whiteSpace);
+      before.style.setProperty('pointer-events', 'none');
+      before.dataset.pdfPseudo = 'before';
+      target.insertBefore(before, target.firstChild);
+    }
+
+    if (sourceAfter.content && sourceAfter.content !== 'none') {
+      const after = document.createElement('span');
+      after.textContent = sourceAfter.content.replace(/^['"]|['"]$/g, '');
+      after.style.setProperty('display', sourceAfter.display);
+      after.style.setProperty('color', sourceAfter.color);
+      after.style.setProperty('background-color', sourceAfter.backgroundColor);
+      after.style.setProperty('font', sourceAfter.font);
+      after.style.setProperty('position', sourceAfter.position);
+      after.style.setProperty('width', sourceAfter.width);
+      after.style.setProperty('height', sourceAfter.height);
+      after.style.setProperty('margin', sourceAfter.margin);
+      after.style.setProperty('padding', sourceAfter.padding);
+      after.style.setProperty('border', sourceAfter.border);
+      after.style.setProperty('border-radius', sourceAfter.borderRadius);
+      after.style.setProperty('box-sizing', sourceAfter.boxSizing);
+      after.style.setProperty('text-align', sourceAfter.textAlign);
+      after.style.setProperty('white-space', sourceAfter.whiteSpace);
+      after.style.setProperty('pointer-events', 'none');
+      after.dataset.pdfPseudo = 'after';
+      target.appendChild(after);
+    }
+  }
 };
 
-const cloneForPdf = (source: HTMLElement): HTMLElement => {
-  const wrapper = document.createElement('div');
-  wrapper.style.position = 'fixed';
-  wrapper.style.left = '-100000px';
-  wrapper.style.top = '0';
-  wrapper.style.width = `${source.getBoundingClientRect().width}px`;
-  wrapper.style.background = '#ffffff';
-  wrapper.style.padding = '0';
-  wrapper.style.margin = '0';
-  wrapper.style.overflow = 'visible';
-  wrapper.style.zIndex = '-1';
+const buildIsolatedPdfFrame = (source: HTMLElement): HTMLIFrameElement => {
+  const rect = source.getBoundingClientRect();
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.style.position = 'fixed';
+  iframe.style.left = '-100000px';
+  iframe.style.top = '0';
+  iframe.style.width = `${Math.ceil(rect.width)}px`;
+  iframe.style.height = `${Math.ceil(rect.height)}px`;
+  iframe.style.border = '0';
+  iframe.style.opacity = '0';
+  iframe.style.pointerEvents = 'none';
+
+  document.body.appendChild(iframe);
+
+  const frameDocument = iframe.contentDocument;
+  if (!frameDocument) {
+    iframe.remove();
+    throw new Error('PDF export frame could not be initialized');
+  }
 
   const clone = source.cloneNode(true) as HTMLElement;
-  clone.style.width = `${source.getBoundingClientRect().width}px`;
+  const sourceNodes = [source, ...Array.from(source.querySelectorAll('*'))];
+  const cloneNodes = [clone, ...Array.from(clone.querySelectorAll('*'))];
+
+  clone.style.width = `${Math.ceil(rect.width)}px`;
   clone.style.maxWidth = 'none';
   clone.style.margin = '0';
   clone.style.boxSizing = 'border-box';
   clone.style.backgroundColor = '#ffffff';
 
-  const sourceNodes = [source, ...Array.from(source.querySelectorAll<HTMLElement>('*'))];
-  const cloneNodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
-
   sourceNodes.forEach((sourceNode, index) => {
-    const target = cloneNodes[index];
-    if (!target) return;
-
-    const styles = getComputedStyle(sourceNode);
-    const colorProperties = [
-      'color',
-      'backgroundColor',
-      'borderTopColor',
-      'borderRightColor',
-      'borderBottomColor',
-      'borderLeftColor',
-      'outlineColor',
-      'textDecorationColor',
-      'columnRuleColor',
-      'caretColor',
-    ] as const;
-
-    colorProperties.forEach((property) => {
-      const value = styles[property];
-      if (value) {
-        target.style[property] = normalizeCssColor(value);
-      }
-    });
-
-    target.style.fontFamily = styles.fontFamily;
-    target.style.fontSize = styles.fontSize;
-    target.style.fontWeight = styles.fontWeight;
-    target.style.lineHeight = styles.lineHeight;
-    target.style.letterSpacing = styles.letterSpacing;
-    target.style.textAlign = styles.textAlign;
-    target.style.opacity = styles.opacity;
-    target.style.boxShadow = 'none';
-    target.style.textShadow = styles.textShadow;
+    const cloneNode = cloneNodes[index];
+    if (cloneNode) copyComputedStyles(sourceNode, cloneNode);
   });
 
-  wrapper.appendChild(clone);
-  document.body.appendChild(wrapper);
-  return wrapper;
+  frameDocument.open();
+  frameDocument.write('<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>');
+  frameDocument.close();
+  frameDocument.body.style.margin = '0';
+  frameDocument.body.style.padding = '0';
+  frameDocument.body.style.background = '#ffffff';
+  frameDocument.body.style.overflow = 'visible';
+  frameDocument.body.appendChild(clone);
+
+  return iframe;
+};
+
+const waitForImages = async (root: HTMLElement): Promise<void> => {
+  const images = Array.from(root.querySelectorAll<HTMLImageElement>('img'));
+  await Promise.all(
+    images.map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          if (img.complete) {
+            resolve();
+            return;
+          }
+          const finish = () => resolve();
+          img.addEventListener('load', finish, { once: true });
+          img.addEventListener('error', finish, { once: true });
+          window.setTimeout(finish, 15000);
+        })
+    )
+  );
 };
 
 export const downloadInvoicePdf = async (
@@ -100,17 +149,22 @@ export const downloadInvoicePdf = async (
     throw new Error('Invoice document element not found');
   }
 
-  let pdfWrapper: HTMLElement | null = null;
+  let iframe: HTMLIFrameElement | null = null;
 
   try {
     await document.fonts?.ready;
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-    pdfWrapper = cloneForPdf(invoiceElement);
-    const pdfElement = pdfWrapper.firstElementChild as HTMLElement | null;
-    if (!pdfElement) {
+    iframe = buildIsolatedPdfFrame(invoiceElement);
+    const frameDocument = iframe.contentDocument;
+    const pdfElement = frameDocument?.body.firstElementChild as HTMLElement | null;
+
+    if (!pdfElement || !frameDocument) {
       throw new Error('Invoice PDF clone could not be created');
     }
+
+    await waitForImages(pdfElement);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
     const rect = pdfElement.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) {
@@ -178,7 +232,7 @@ export const downloadInvoicePdf = async (
     const message = error instanceof Error ? error.message : String(error || 'Unknown PDF export error');
     throw new Error(`PDF export failed: ${message}`);
   } finally {
-    pdfWrapper?.remove();
+    iframe?.remove();
   }
 };
 
