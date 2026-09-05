@@ -14,6 +14,34 @@ function normalizeEventDate(value: unknown): string {
   return '';
 }
 
+function buildBookingPayload(invoice: Invoice) {
+  return {
+    clientId: invoice.clientId,
+    clientName: invoice.clientName,
+    eventType: invoice.eventType,
+    eventDate: normalizeEventDate(invoice.eventDate),
+    eventTime: invoice.eventTime || '',
+    venue: invoice.venue || '',
+    guestCount: Math.max(0, Number(invoice.guestCount || 0)),
+    package: invoice.items?.[0]?.description?.trim() || 'Custom Package',
+    totalAmount: Number(invoice.totalAmount || 0),
+    advancePaid: Number(invoice.advancePaid || 0),
+    bookingStatus: 'Confirmed' as const,
+    paymentStatus: Number(invoice.advancePaid || 0) >= Number(invoice.totalAmount || 0) && Number(invoice.totalAmount || 0) > 0 ? 'Paid' as const : 'Pending' as const,
+    notes: invoice.notes || '',
+    assignedVendors: [],
+  };
+}
+
+/** Create the booking linked to an invoice. Throws instead of silently hiding DB/RLS/validation errors. */
+export async function createBookingForInvoice(invoice: Invoice): Promise<Booking | null> {
+  const eventDate = normalizeEventDate(invoice.eventDate);
+  if (!eventDate || !invoice.eventType || !invoice.clientId) return null;
+  const booking = await bookingService.createBooking(buildBookingPayload({ ...invoice, eventDate }));
+  if (invoice.bookingId !== booking.id) await invoiceService.updateInvoice(invoice.id, { bookingId: booking.id, eventDate });
+  return booking;
+}
+
 /** Create an invoice and its linked booking as one user-facing flow. */
 export async function createInvoiceWithBooking(invoiceData: Omit<Invoice, 'id' | 'createdAt'>): Promise<{ invoice: Invoice; booking: Booking | null }> {
   const normalizedItems = (invoiceData.items || []).map((item) => ({ ...item, quantity: Number(item.quantity) || 0, unitPrice: Number(item.unitPrice) || 0, total: (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0) }));
@@ -27,19 +55,16 @@ export async function createInvoiceWithBooking(invoiceData: Omit<Invoice, 'id' |
   const eventDate = normalizeEventDate(invoiceData.eventDate);
 
   const invoice = await invoiceService.createInvoice({ ...invoiceData, eventDate, issueDate, items: normalizedItems, bookingId: undefined, subtotal, totalAmount, remainingBalance: Math.max(0, totalAmount - advancePaid) });
-  if (!eventDate || !invoiceData.eventType || !invoiceData.clientId) return { invoice, booking: null };
+  if (!eventDate || !invoice.eventType || !invoice.clientId) return { invoice, booking: null };
 
   try {
-    const booking = await bookingService.createBooking({
-      clientId: invoiceData.clientId, clientName: invoiceData.clientName, eventType: invoiceData.eventType,
-      eventDate, eventTime: invoiceData.eventTime || '', venue: invoiceData.venue || '', guestCount: Math.max(0, Number((invoiceData as any).guestCount || 0)),
-      package: packageName, totalAmount, advancePaid, bookingStatus: 'Confirmed', paymentStatus: advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : 'Pending', notes: invoiceData.notes || '', assignedVendors: [],
-    });
-    const linkedInvoice = await invoiceService.updateInvoice(invoice.id, { bookingId: booking.id });
-    return { invoice: linkedInvoice, booking };
+    const booking = await createBookingForInvoice({ ...invoice, items: normalizedItems, eventDate, totalAmount, advancePaid });
+    const linkedInvoice = booking ? await invoiceService.getInvoiceById(invoice.id) : invoice;
+    return { invoice: linkedInvoice || invoice, booking };
   } catch (bookingError) {
-    console.error('Invoice saved successfully, but linked booking creation failed:', bookingError);
-    return { invoice, booking: null };
+    try { await invoiceService.deleteInvoice(invoice.id); } catch (rollbackError) { console.error('Invoice rollback failed after booking sync error:', rollbackError); }
+    const message = bookingError instanceof Error ? bookingError.message : String(bookingError);
+    throw new Error(`Invoice could not be synced to the booking calendar: ${message}`);
   }
 }
 
@@ -56,14 +81,8 @@ export async function backfillBookingsFromInvoices(invoices: Invoice[], existing
       continue;
     }
     try {
-      const booking = await bookingService.createBooking({
-        clientId: invoice.clientId, clientName: invoice.clientName, eventType: invoice.eventType, eventDate,
-        eventTime: invoice.eventTime || '', venue: invoice.venue || '', guestCount: Math.max(0, Number(invoice.guestCount || 0)),
-        package: invoice.items?.[0]?.description?.trim() || 'Custom Package', totalAmount: Number(invoice.totalAmount || 0), advancePaid: Number(invoice.advancePaid || 0),
-        bookingStatus: 'Confirmed', paymentStatus: Number(invoice.advancePaid || 0) >= Number(invoice.totalAmount || 0) && Number(invoice.totalAmount || 0) > 0 ? 'Paid' : 'Pending', notes: invoice.notes || '', assignedVendors: [],
-      });
-      await invoiceService.updateInvoice(invoice.id, { bookingId: booking.id, eventDate });
-      bookings.push(booking);
+      const booking = await createBookingForInvoice({ ...invoice, eventDate });
+      if (booking) bookings.push(booking);
     } catch (error) {
       console.error(`Could not backfill booking for invoice ${invoice.invoiceNumber}:`, error);
     }
