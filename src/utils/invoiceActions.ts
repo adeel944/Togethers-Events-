@@ -20,9 +20,9 @@ const getSafeFilename = (invoiceNumber: string) => {
 };
 
 /**
- * Collect the app CSS as text where possible. This is intentionally used by the
- * browser's SVG renderer rather than html2canvas, so modern CSS colors such as
- * oklab()/oklch() are handled by the browser itself.
+ * Read the CSSOM instead of passing stylesheet elements to html2canvas.
+ * The browser's native SVG foreignObject renderer handles modern CSS colors
+ * such as oklab()/oklch(), so those functions never reach an html2canvas parser.
  */
 const collectStylesheetText = (): string => {
   const chunks: string[] = [];
@@ -32,23 +32,14 @@ const collectStylesheetText = (): string => {
       const rules = Array.from(sheet.cssRules || []);
       if (rules.length) chunks.push(rules.map((rule) => rule.cssText).join('\n'));
     } catch {
-      // Cross-origin stylesheets cannot expose cssRules. The original stylesheet
-      // is still copied below as a <link>, which works for same-origin app assets.
-      if (sheet.href) {
-        chunks.push(`@import url(${JSON.stringify(sheet.href)});`);
-      }
+      // Ignore inaccessible cross-origin stylesheets. The invoice clone still
+      // contains the live DOM styling, and same-origin application styles are
+      // normally exposed through cssRules.
     }
   }
 
   return chunks.join('\n');
 };
-
-const escapeXml = (value: string) => value
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;')
-  .replace(/'/g, '&apos;');
 
 const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement): Promise<HTMLCanvasElement> => {
   await waitForInvoiceAssets(invoiceSheet);
@@ -58,9 +49,8 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement): Promise<HTMLCan
   const exportClone = invoiceSheet.cloneNode(true) as HTMLElement;
   exportClone.removeAttribute('id');
 
-  // Force the same A4-width coordinate system every time. Typography remains
-  // driven by the invoice's real CSS classes instead of being scaled by an
-  // arbitrary screenshot width.
+  // Use a fixed A4 CSS-pixel coordinate system so the resulting PDF does not
+  // inherit responsive dashboard widths or unexpectedly enlarge the typography.
   exportClone.style.width = `${WIDTH}px`;
   exportClone.style.minWidth = `${WIDTH}px`;
   exportClone.style.maxWidth = `${WIDTH}px`;
@@ -71,8 +61,6 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement): Promise<HTMLCan
 
   const styles = collectStylesheetText();
 
-  // Put the clone in a real browser document first so we can measure the exact
-  // rendered height before creating the SVG snapshot.
   const measurer = document.createElement('div');
   measurer.style.position = 'fixed';
   measurer.style.left = '-100000px';
@@ -112,6 +100,7 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement): Promise<HTMLCan
 
     const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
     const svgUrl = URL.createObjectURL(svgBlob);
+
     try {
       const image = new Image();
       image.decoding = 'sync';
@@ -128,6 +117,7 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement): Promise<HTMLCan
       canvas.height = safeHeight * scale;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Could not create PDF canvas.');
+
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.setTransform(scale, 0, 0, scale, 0, 0);
@@ -153,10 +143,8 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
   const pdfWidth = pdf.internal.pageSize.getWidth();
   const pdfPageHeight = pdf.internal.pageSize.getHeight();
-
-  // The canvas is 794 CSS px wide = A4 width at the browser's 96 CSS-DPI
-  // coordinate system. Slice vertically into A4 pages without changing scale.
   const pageCanvasHeight = Math.max(1, Math.floor((canvas.width * pdfPageHeight) / pdfWidth));
+
   let offsetY = 0;
   let pageIndex = 0;
 
@@ -200,8 +188,7 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
     pageIndex += 1;
   }
 
-  const filename = getSafeFilename(invoiceNumber);
-  pdf.save(filename);
+  pdf.save(getSafeFilename(invoiceNumber));
 };
 
 export const generateWhatsAppUrl = (invoice: Invoice, profile: BusinessProfile): string => {
