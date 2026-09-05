@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
 import {
   Plus, Search, FileText, Eye, Edit2, Copy, Trash2,
-  UserPlus, Users, Check, CheckCircle2, Clock
+  UserPlus, Users, Check, CheckCircle2, Clock, UtensilsCrossed, X
 } from 'lucide-react';
 import {
   Invoice, Client, Booking, BusinessProfile, InvoiceSettings, InvoiceItem,
-  PaymentStatus, EventType
+  PaymentStatus, EventType, MenuItem
 } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
 import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
 import { initialBusinessProfile, initialInvoiceSettings } from '../../services/mockData';
 import { clientService } from '../../services/clientService';
+
+const MENU_KEY = 'together-events-menus-v1';
+const loadMenus = (): MenuItem[] => { try { const raw = localStorage.getItem(MENU_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; } };
 
 interface InvoicesViewProps {
   invoices?: Invoice[];
@@ -42,7 +45,7 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
   const invoices = Array.isArray(inputInvoices) ? inputInvoices : [];
   const [clients, setClients] = useState<Client[]>(Array.isArray(inputClients) ? inputClients : []);
   React.useEffect(() => { if (Array.isArray(inputClients)) setClients(inputClients); }, [inputClients]);
-  const formatMoney = (amount: number) => `${profile.currencySymbol || '$'}${Number(amount || 0).toLocaleString()}`;
+  const formatMoney = (amount: number) => `${profile.currencySymbol || 'Rs. '}${Number(amount || 0).toLocaleString()}`;
   const today = () => new Date().toISOString().split('T')[0];
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Paid' | 'Pending'>('All');
@@ -51,6 +54,10 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
   const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing');
   const [clientCreatedSuccess, setClientCreatedSuccess] = useState<string | null>(null);
   const [newClientData, setNewClientData] = useState({ fullName: '', phone: '', whatsApp: '', email: '' });
+  const [isMenuDrawerOpen, setIsMenuDrawerOpen] = useState(false);
+  const [menus, setMenus] = useState<MenuItem[]>([]);
+  const [selectedMenu, setSelectedMenu] = useState<MenuItem | null>(null);
+  const [menuGuests, setMenuGuests] = useState(1);
 
   const generateNewInvoiceNumber = () => {
     const d = new Date();
@@ -72,6 +79,7 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
     setEditingInvoice(null);
     setClientMode('new'); setClientCreatedSuccess(null);
     setNewClientData({ fullName: '', phone: '', whatsApp: '', email: '' });
+    setSelectedMenu(null); setMenuGuests(1); setIsMenuDrawerOpen(false); setMenus(loadMenus());
     setFormData({
       invoiceNumber: generateNewInvoiceNumber(), documentTitle: 'BOOKING CONFIRMATION',
       clientId: '', clientName: '', clientPhone: '', clientWhatsApp: '', clientEmail: '', billingAddress: '',
@@ -84,7 +92,7 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
   };
 
   const openEditModal = (inv: Invoice) => {
-    setEditingInvoice(inv); setClientMode('existing'); setClientCreatedSuccess(null);
+    setEditingInvoice(inv); setClientMode('existing'); setClientCreatedSuccess(null); setSelectedMenu(null); setMenuGuests(1); setIsMenuDrawerOpen(false); setMenus(loadMenus());
     setFormData({
       invoiceNumber: inv.invoiceNumber, documentTitle: 'BOOKING CONFIRMATION',
       clientId: inv.clientId, clientName: inv.clientName, clientPhone: inv.clientPhone,
@@ -121,6 +129,21 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
   };
   const addItem = () => setFormData({ ...formData, items: [...formData.items, { id: 'item-' + Date.now(), description: '', quantity: 1, unitPrice: 0, total: 0 }] });
   const removeItem = (index: number) => { if (formData.items.length > 1) setFormData({ ...formData, items: formData.items.filter((_, i) => i !== index) }); };
+
+  const openMenuDrawer = () => { setMenus(loadMenus()); setSelectedMenu(null); setMenuGuests(1); setIsMenuDrawerOpen(true); };
+  const addSelectedMenuToInvoice = () => {
+    if (!selectedMenu) return;
+    const price = Number(selectedMenu.price || 0);
+    if (price <= 0) { alert('Please set a price for this menu first in Menus.'); return; }
+    const guests = Math.max(1, Number(menuGuests || 1));
+    const menuItem: InvoiceItem = { id: `menu-${selectedMenu.id}-${Date.now()}`, description: `${selectedMenu.name}${selectedMenu.description ? ` — ${selectedMenu.description}` : ''}`, quantity: guests, unitPrice: price, total: guests * price };
+    setFormData((prev) => {
+      const existingBlank = prev.items.length === 1 && !prev.items[0].description && Number(prev.items[0].unitPrice) === 0;
+      return { ...prev, items: existingBlank ? [menuItem] : [...prev.items, menuItem] };
+    });
+    setIsMenuDrawerOpen(false);
+  };
+
   const formSubtotal = formData.items.reduce((acc, it) => acc + (it.total || it.quantity * it.unitPrice), 0);
   const formTotal = Math.max(0, formSubtotal - formData.discount);
   const formRemaining = Math.max(0, formTotal - formData.advancePaid);
@@ -168,13 +191,22 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200/90"><div className="sm:col-span-3"><span className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1">3. Event Details</span></div><div><label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Event Type</label><select value={formData.eventType} onChange={(e) => setFormData({ ...formData, eventType: e.target.value as any })} className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm"><option value="">Select event type...</option>{EVENT_TYPE_OPTIONS.map((et) => <option key={et} value={et}>{et}</option>)}</select></div><div><label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Event Date</label><input type="date" value={formData.eventDate} onChange={(e) => setFormData({ ...formData, eventDate: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm" /></div><div><label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Venue / Location (Optional)</label><input type="text" value={formData.venue} placeholder="e.g. Grand Marquee Hall" onChange={(e) => setFormData({ ...formData, venue: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm" /></div></div>
 
-          <div><div className="flex items-center justify-between mb-2"><label className="text-xs font-bold text-slate-800 uppercase tracking-wider">4. Line Items / Services</label><button type="button" onClick={addItem} className="text-xs font-semibold text-slate-900 hover:text-slate-700 flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"><Plus className="w-3.5 h-3.5" /><span>Add Item</span></button></div><div className="space-y-2">{formData.items.map((item, idx) => <div key={item.id || idx} className="grid grid-cols-12 gap-2 items-center bg-slate-50/80 p-2.5 rounded-xl border border-slate-200/80"><div className="col-span-6"><input type="text" placeholder="Service / item description..." value={item.description} onChange={(e) => handleItemChange(idx, 'description', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white" required /></div><div className="col-span-2"><input type="number" min="1" placeholder="Qty" value={item.quantity} onChange={(e) => handleItemChange(idx, 'quantity', Number(e.target.value))} className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs text-center bg-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" required /></div><div className="col-span-2"><input type="number" min="0" placeholder="Price" value={item.unitPrice} onChange={(e) => handleItemChange(idx, 'unitPrice', Number(e.target.value))} className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs text-right bg-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" required /></div><div className="col-span-1 text-right text-xs font-bold font-mono text-slate-800">{formatMoney(item.total || item.quantity * item.unitPrice)}</div><div className="col-span-1 text-right"><button type="button" onClick={() => removeItem(idx)} disabled={formData.items.length <= 1} className="p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30"><Trash2 className="w-3.5 h-3.5" /></button></div></div>)}</div></div>
+          <div><div className="flex items-center justify-between mb-2"><label className="text-xs font-bold text-slate-800 uppercase tracking-wider">4. Line Items / Services</label><div className="flex items-center gap-2"><button type="button" onClick={openMenuDrawer} className="text-xs font-semibold text-slate-900 hover:text-slate-700 flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors"><UtensilsCrossed className="w-3.5 h-3.5" /><span>Menu</span></button><button type="button" onClick={addItem} className="text-xs font-semibold text-slate-900 hover:text-slate-700 flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"><Plus className="w-3.5 h-3.5" /><span>Add Item</span></button></div></div><div className="space-y-2">{formData.items.map((item, idx) => <div key={item.id || idx} className="grid grid-cols-12 gap-2 items-center bg-slate-50/80 p-2.5 rounded-xl border border-slate-200/80"><div className="col-span-6"><input type="text" placeholder="Service / item description..." value={item.description} onChange={(e) => handleItemChange(idx, 'description', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white" required /></div><div className="col-span-2"><input type="number" min="1" placeholder="Qty" value={item.quantity} onChange={(e) => handleItemChange(idx, 'quantity', Number(e.target.value))} className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs text-center bg-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" required /></div><div className="col-span-2"><input type="number" min="0" placeholder="Price" value={item.unitPrice} onChange={(e) => handleItemChange(idx, 'unitPrice', Number(e.target.value))} className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs text-right bg-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" required /></div><div className="col-span-1 text-right text-xs font-bold font-mono text-slate-800">{formatMoney(item.total || item.quantity * item.unitPrice)}</div><div className="col-span-1 text-right"><button type="button" onClick={() => removeItem(idx)} disabled={formData.items.length <= 1} className="p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30"><Trash2 className="w-3.5 h-3.5" /></button></div></div>)}</div></div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-slate-200"><div className="space-y-4"><div><label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Terms &amp; Conditions</label><textarea rows={4} value={formData.termsAndConditions} onChange={(e) => setFormData({ ...formData, termsAndConditions: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white" /></div><div><label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Private Notes / Remarks (Optional)</label><textarea rows={2} value={formData.notes} placeholder="Optional internal remarks..." onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white" /></div></div><div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2.5 text-xs"><span className="font-bold text-slate-800 uppercase tracking-wider block text-xs border-b border-slate-200 pb-1.5">Financial Summary &amp; Payment Status</span><div className="flex justify-between text-slate-600"><span>Subtotal:</span><span className="font-semibold font-mono">{formatMoney(formSubtotal)}</span></div><div className="flex items-center justify-between gap-2"><span className="text-slate-600">Discount:</span><input type="number" min="0" value={formData.discount} onChange={(e) => setFormData({ ...formData, discount: Number(e.target.value) })} className="w-32 px-2 py-1 rounded-lg border border-slate-200 bg-white text-right text-xs font-mono [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" /></div><div className="flex justify-between font-bold text-slate-900 border-t border-slate-200 pt-2 text-sm"><span>Total Amount:</span><span className="font-mono text-base">{formatMoney(formTotal)}</span></div><div className="flex items-center justify-between gap-2 pt-1"><span className="text-slate-700 font-semibold">Advance Paid:</span><input type="number" min="0" value={formData.advancePaid} onChange={(e) => setFormData({ ...formData, advancePaid: Number(e.target.value) })} className="w-32 px-2 py-1 rounded-lg border border-slate-200 bg-white text-right text-xs font-mono font-bold [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" /></div><div className="flex justify-between font-bold text-rose-700 bg-rose-50/70 p-2 rounded-lg border border-rose-100"><span>Remaining Balance:</span><span className="font-mono">{formatMoney(formRemaining)}</span></div><div className="pt-2 border-t border-slate-200 flex items-center justify-between"><span className="text-xs text-slate-500 font-medium">Computed Payment Status:</span><span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold ${computedPaymentStatus === 'Paid' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-rose-100 text-rose-800 border border-rose-300'}`}>{computedPaymentStatus === 'Paid' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}<span>{computedPaymentStatus}</span></span></div><p className="text-[10px] text-slate-400">Rule: If Advance Paid == Total Amount → <strong>Paid</strong>. If Advance Paid &lt; Total Amount → <strong>Pending</strong>.</p></div></div>
 
           <div className="flex justify-end gap-2 pt-4 border-t border-slate-100"><button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-medium text-xs sm:text-sm">Cancel</button><button type="submit" className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs sm:text-sm shadow-xs">{editingInvoice ? 'Update Invoice' : 'Create & Save Invoice'}</button></div>
         </form>
       </Modal>
+
+      {isMenuDrawerOpen && <>
+        <div className="fixed inset-0 z-[110] bg-slate-900/25 backdrop-blur-[1px]" onClick={() => setIsMenuDrawerOpen(false)} />
+        <aside className="fixed right-0 top-0 z-[120] h-full w-full max-w-md bg-white shadow-2xl border-l border-slate-200 flex flex-col animate-in slide-in-from-right duration-200">
+          <div className="flex items-center justify-between p-5 border-b border-slate-200"><div><h2 className="text-lg font-bold text-slate-900 flex items-center gap-2"><UtensilsCrossed className="w-5 h-5" />Select Menu</h2><p className="text-xs text-slate-500 mt-1">Choose a menu and enter the number of guests.</p></div><button type="button" onClick={() => setIsMenuDrawerOpen(false)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"><X className="w-5 h-5" /></button></div>
+          <div className="flex-1 overflow-y-auto p-5 space-y-3">{menus.length === 0 ? <div className="text-center py-12"><UtensilsCrossed className="w-10 h-10 mx-auto text-slate-300 mb-3" /><p className="font-semibold text-slate-700">No menus found</p><p className="text-xs text-slate-400 mt-1">Add menus first from the Menus section.</p></div> : menus.map((menu) => { const active = selectedMenu?.id === menu.id; return <button key={menu.id} type="button" onClick={() => setSelectedMenu(menu)} className={`w-full text-left p-4 rounded-xl border transition-all ${active ? 'border-slate-900 bg-slate-50 ring-1 ring-slate-900' : 'border-slate-200 hover:border-slate-400 hover:bg-slate-50'}`}><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-slate-900">{menu.name}</p>{menu.description && <p className="text-xs text-slate-500 mt-1">{menu.description}</p>}</div><span className="font-bold text-slate-900 whitespace-nowrap">{menu.price != null ? formatMoney(menu.price) : 'Price not set'}</span></div></button>; })}</div>
+          <div className="p-5 border-t border-slate-200 bg-slate-50 space-y-4"><div><label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Number of Guests</label><input type="number" min="1" value={menuGuests} onChange={(e) => setMenuGuests(Math.max(1, Number(e.target.value || 1)))} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold" /></div>{selectedMenu && <div className="rounded-xl bg-white border border-slate-200 p-3 text-sm"><div className="flex justify-between gap-3"><span className="font-semibold text-slate-700">{selectedMenu.name}</span><span className="font-mono font-bold">{formatMoney(Number(selectedMenu.price || 0))} / guest</span></div><div className="flex justify-between mt-2 pt-2 border-t border-slate-100"><span className="text-slate-500">{menuGuests} guests × {formatMoney(Number(selectedMenu.price || 0))}</span><span className="font-bold text-slate-900">{formatMoney(menuGuests * Number(selectedMenu.price || 0))}</span></div></div>}<button type="button" disabled={!selectedMenu || Number(selectedMenu.price || 0) <= 0} onClick={addSelectedMenuToInvoice} className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-bold">Add Menu to Invoice</button></div>
+        </aside>
+      </>}
     </div>
   );
 };
