@@ -15,10 +15,28 @@ const waitForInvoiceAssets = async (element: HTMLElement) => {
 
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
-/** html2canvas 1.x cannot parse modern CSS color functions such as oklch().
- * Copy the browser's resolved RGB colors onto the export clone so the renderer
- * never has to parse the original OKLCH declarations from Tailwind/global CSS.
+/**
+ * html2canvas 1.x cannot parse modern CSS color functions such as oklch()/oklab().
+ * Browser computed styles can still expose those functions, so simply copying the
+ * computed value is not enough. We ask the browser's canvas color parser to resolve
+ * each color into a legacy CSS hex/rgba value that html2canvas understands.
  */
+const legacyColorContext = document.createElement('canvas').getContext('2d');
+
+const toLegacyColor = (value: string): string => {
+  const raw = String(value || '').trim();
+  if (!raw || raw === 'transparent' || raw === 'none') return raw;
+  if (!legacyColorContext) return raw;
+
+  try {
+    legacyColorContext.fillStyle = '#000000';
+    legacyColorContext.fillStyle = raw;
+    return legacyColorContext.fillStyle || raw;
+  } catch {
+    return raw;
+  }
+};
+
 const normalizeExportColors = (root: HTMLElement) => {
   const nodes = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))];
   const colorProps = [
@@ -39,15 +57,21 @@ const normalizeExportColors = (root: HTMLElement) => {
     for (const prop of colorProps) {
       const value = computed[prop];
       if (value && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)') {
-        node.style[prop] = value;
+        node.style[prop] = toLegacyColor(value);
       }
     }
 
-    const shadow = computed.boxShadow;
-    if (shadow && shadow !== 'none') node.style.boxShadow = shadow;
+    // Shadow parsers in html2canvas can also choke on modern CSS color syntax.
+    // The invoice remains fully readable without these decorative shadows in PDF.
+    if (computed.boxShadow && computed.boxShadow !== 'none') node.style.boxShadow = 'none';
+    if (computed.textShadow && computed.textShadow !== 'none') node.style.textShadow = 'none';
 
-    const textShadow = computed.textShadow;
-    if (textShadow && textShadow !== 'none') node.style.textShadow = textShadow;
+    // Gradients can embed oklab()/oklch() internally. Let the solid background
+    // color above provide the stable PDF fallback instead of feeding the gradient
+    // expression to html2canvas.
+    if (/\b(?:oklch|oklab|color\()\s*\(/i.test(computed.backgroundImage || '')) {
+      node.style.backgroundImage = 'none';
+    }
   }
 };
 
