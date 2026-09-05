@@ -27,34 +27,50 @@ function buildBookingPayload(invoice: Invoice) {
     totalAmount: Number(invoice.totalAmount || 0),
     advancePaid: Number(invoice.advancePaid || 0),
     bookingStatus: 'Confirmed' as const,
-    paymentStatus: Number(invoice.advancePaid || 0) >= Number(invoice.totalAmount || 0) && Number(invoice.totalAmount || 0) > 0 ? 'Paid' as const : 'Pending' as const,
+    paymentStatus: Number(invoice.advancePaid || 0) >= Number(invoice.totalAmount || 0) && Number(invoice.totalAmount || 0) > 0 ? 'Paid' as const : Number(invoice.advancePaid || 0) > 0 ? 'Partial' as const : 'Pending' as const,
     notes: invoice.notes || '',
     assignedVendors: [],
   };
 }
 
-/** Create the booking linked to an invoice. Throws instead of silently hiding DB/RLS/validation errors. */
+/** Create the booking linked to an invoice. */
 export async function createBookingForInvoice(invoice: Invoice): Promise<Booking | null> {
   const eventDate = normalizeEventDate(invoice.eventDate);
   if (!eventDate || !invoice.eventType || !invoice.clientId) return null;
   const booking = await bookingService.createBooking(buildBookingPayload({ ...invoice, eventDate }));
-  if (invoice.bookingId !== booking.id) await invoiceService.updateInvoice(invoice.id, { bookingId: booking.id, eventDate });
+  if (invoice.bookingId !== booking.id) {
+    await invoiceService.updateInvoice(invoice.id, { bookingId: booking.id, eventDate });
+  }
   return booking;
 }
 
-/** Create an invoice and its linked booking as one user-facing flow. */
+/** Save the invoice first; booking sync is best-effort so a booking DB issue never destroys a valid invoice. */
 export async function createInvoiceWithBooking(invoiceData: Omit<Invoice, 'id' | 'createdAt'>): Promise<{ invoice: Invoice; booking: Booking | null }> {
-  const normalizedItems = (invoiceData.items || []).map((item) => ({ ...item, quantity: Number(item.quantity) || 0, unitPrice: Number(item.unitPrice) || 0, total: (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0) }));
+  const normalizedItems = (invoiceData.items || []).map((item) => ({
+    ...item,
+    quantity: Math.max(1, Number(item.quantity) || 1),
+    unitPrice: Math.max(0, Number(item.unitPrice) || 0),
+    total: (Math.max(1, Number(item.quantity) || 1)) * (Math.max(0, Number(item.unitPrice) || 0)),
+  }));
   const subtotal = normalizedItems.reduce((sum, item) => sum + item.total, 0);
   const discount = Math.max(0, Number(invoiceData.discount) || 0);
   const tax = Math.max(0, Number(invoiceData.tax) || 0);
   const totalAmount = Math.max(0, subtotal - discount + tax);
   const advancePaid = Math.max(0, Number(invoiceData.advancePaid) || 0);
-  const packageName = normalizedItems[0]?.description?.trim() || 'Custom Package';
   const issueDate = invoiceData.issueDate || new Date().toISOString().split('T')[0];
   const eventDate = normalizeEventDate(invoiceData.eventDate);
 
-  const invoice = await invoiceService.createInvoice({ ...invoiceData, eventDate, issueDate, items: normalizedItems, bookingId: undefined, subtotal, totalAmount, remainingBalance: Math.max(0, totalAmount - advancePaid) });
+  const invoice = await invoiceService.createInvoice({
+    ...invoiceData,
+    eventDate,
+    issueDate,
+    items: normalizedItems,
+    bookingId: undefined,
+    subtotal,
+    totalAmount,
+    remainingBalance: Math.max(0, totalAmount - advancePaid),
+  });
+
   if (!eventDate || !invoice.eventType || !invoice.clientId) return { invoice, booking: null };
 
   try {
@@ -62,9 +78,8 @@ export async function createInvoiceWithBooking(invoiceData: Omit<Invoice, 'id' |
     const linkedInvoice = booking ? await invoiceService.getInvoiceById(invoice.id) : invoice;
     return { invoice: linkedInvoice || invoice, booking };
   } catch (bookingError) {
-    try { await invoiceService.deleteInvoice(invoice.id); } catch (rollbackError) { console.error('Invoice rollback failed after booking sync error:', rollbackError); }
-    const message = bookingError instanceof Error ? bookingError.message : String(bookingError);
-    throw new Error(`Invoice could not be synced to the booking calendar: ${message}`);
+    console.error('Invoice saved, but booking/calendar sync failed:', bookingError);
+    return { invoice, booking: null };
   }
 }
 
