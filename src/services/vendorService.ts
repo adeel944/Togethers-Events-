@@ -31,7 +31,19 @@ export const vendorService = {
 
   async createVendor(payload: Omit<Vendor, 'id' | 'createdAt'>): Promise<Vendor> {
     const businessId = await getBusinessId();
-    const { data, error } = await supabase.from('vendors').insert({ business_id: businessId, vendor_name: payload.vendorName, category: payload.category, contact_person: payload.contactPerson || null, phone: payload.phone || null, whatsapp: payload.whatsApp || null, email: payload.email || null, address: payload.address || null, services: payload.services || null, payment_terms: payload.paymentTerms || null, notes: payload.notes || null }).select('*').single();
+    const { data, error } = await supabase.from('vendors').insert({
+      business_id: businessId,
+      vendor_name: payload.vendorName?.trim() || 'Unnamed Vendor',
+      category: payload.category || 'Other',
+      contact_person: payload.contactPerson?.trim() || '',
+      phone: payload.phone?.trim() || '',
+      whatsapp: payload.whatsApp?.trim() || '',
+      email: payload.email?.trim() || '',
+      address: payload.address?.trim() || '',
+      services: payload.services?.trim() || '',
+      payment_terms: payload.paymentTerms?.trim() || '',
+      notes: payload.notes?.trim() || ''
+    }).select('*').single();
     if (error) throw new Error(error.message);
     return mapVendor(data);
   },
@@ -39,16 +51,16 @@ export const vendorService = {
   async updateVendor(id: string, updates: Partial<Vendor>): Promise<Vendor> {
     const businessId = await getBusinessId();
     const dbUpdates: Record<string, any> = {};
-    if (updates.vendorName !== undefined) dbUpdates.vendor_name = updates.vendorName;
-    if (updates.category !== undefined) dbUpdates.category = updates.category;
-    if (updates.contactPerson !== undefined) dbUpdates.contact_person = updates.contactPerson || null;
-    if (updates.phone !== undefined) dbUpdates.phone = updates.phone || null;
-    if (updates.whatsApp !== undefined) dbUpdates.whatsapp = updates.whatsApp || null;
-    if (updates.email !== undefined) dbUpdates.email = updates.email || null;
-    if (updates.address !== undefined) dbUpdates.address = updates.address || null;
-    if (updates.services !== undefined) dbUpdates.services = updates.services || null;
-    if (updates.paymentTerms !== undefined) dbUpdates.payment_terms = updates.paymentTerms || null;
-    if (updates.notes !== undefined) dbUpdates.notes = updates.notes || null;
+    if (updates.vendorName !== undefined) dbUpdates.vendor_name = updates.vendorName?.trim() || 'Unnamed Vendor';
+    if (updates.category !== undefined) dbUpdates.category = updates.category || 'Other';
+    if (updates.contactPerson !== undefined) dbUpdates.contact_person = updates.contactPerson?.trim() || '';
+    if (updates.phone !== undefined) dbUpdates.phone = updates.phone?.trim() || '';
+    if (updates.whatsApp !== undefined) dbUpdates.whatsapp = updates.whatsApp?.trim() || '';
+    if (updates.email !== undefined) dbUpdates.email = updates.email?.trim() || '';
+    if (updates.address !== undefined) dbUpdates.address = updates.address?.trim() || '';
+    if (updates.services !== undefined) dbUpdates.services = updates.services?.trim() || '';
+    if (updates.paymentTerms !== undefined) dbUpdates.payment_terms = updates.paymentTerms?.trim() || '';
+    if (updates.notes !== undefined) dbUpdates.notes = updates.notes?.trim() || '';
     const { data, error } = await supabase.from('vendors').update(dbUpdates).eq('id', id).eq('business_id', businessId).select('*').single();
     if (error) throw new Error(error.message);
     return mapVendor(data);
