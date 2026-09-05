@@ -42,9 +42,7 @@ const toLegacyColor = (value: string) => {
 };
 
 const isColorProperty = (property: string) =>
-  property === 'color' ||
-  property === 'caret-color' ||
-  property.endsWith('color');
+  property === 'color' || property === 'caret-color' || property.endsWith('color');
 
 const sanitizeComputedValue = (property: string, value: string, computed: CSSStyleDeclaration) => {
   if (!unsupportedColorPattern.test(value)) return value;
@@ -62,20 +60,16 @@ const sanitizeComputedValue = (property: string, value: string, computed: CSSSty
   }
 
   if (property === 'background') {
-    const backgroundColor = computed.backgroundColor;
-    return `linear-gradient(${toLegacyColor(backgroundColor)}, ${toLegacyColor(backgroundColor)})`;
+    return toLegacyColor(computed.backgroundColor);
   }
 
-  // Drop only the unsupported declaration. Individual color properties are
-  // copied separately below, so borders/backgrounds remain visually usable.
   return null;
 };
 
 /**
- * Clone the already-rendered invoice into an isolated document and replace every
- * CSS declaration that could contain modern color functions with legacy values.
- * The iframe has no Tailwind/app stylesheets, so html2canvas cannot parse the
- * application's oklab/oklch declarations by accident.
+ * Rebuild the invoice using only inline, browser-computed CSS values.
+ * The isolated iframe has no application stylesheets, which prevents Tailwind
+ * color functions such as oklab()/oklch() from reaching html2canvas's parser.
  */
 const buildIsolatedInvoice = (source: HTMLElement) => {
   const sourceNodes = [source, ...Array.from(source.querySelectorAll<HTMLElement>('*'))];
@@ -104,11 +98,10 @@ const buildIsolatedInvoice = (source: HTMLElement) => {
       try {
         cloneNode.style.setProperty(property, safeValue, computed.getPropertyPriority(property));
       } catch {
-        // Ignore individual browser-generated declarations that cannot be reapplied.
+        // Ignore browser-generated declarations that cannot be reapplied.
       }
     }
 
-    // Explicitly preserve legacy color values after all shorthand declarations.
     const colorPairs: Array<[string, string]> = [
       ['color', computed.color],
       ['background-color', computed.backgroundColor],
@@ -126,6 +119,22 @@ const buildIsolatedInvoice = (source: HTMLElement) => {
         cloneNode.style.setProperty(property, toLegacyColor(value));
       } catch {
         // Ignore individual color declarations that fail in the browser.
+      }
+    }
+
+    // Presentation attributes can also carry CSS colors (notably SVG content).
+    // Convert/remove those explicitly so html2canvas never sees oklab/oklch here.
+    for (const attribute of [
+      'fill',
+      'stroke',
+      'stop-color',
+      'flood-color',
+      'lighting-color',
+      'color',
+    ]) {
+      const value = cloneNode.getAttribute(attribute);
+      if (value && unsupportedColorPattern.test(value)) {
+        cloneNode.setAttribute(attribute, toLegacyColor(value));
       }
     }
   }
@@ -187,6 +196,7 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
 
     isolatedDocument.body.appendChild(isolated);
 
+    // The iframe has no stylesheet, so wait for local assets only.
     await waitForInvoiceAssets(isolated, isolatedDocument);
     await nextFrame(isolatedWindow);
 
@@ -198,6 +208,13 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
 
     isolated.style.height = `${height}px`;
     isolated.style.minHeight = `${height}px`;
+
+    // Final defensive sweep for any CSS-bearing attribute that may have survived.
+    isolated.querySelectorAll<HTMLElement>('[style]').forEach((node) => {
+      if (unsupportedColorPattern.test(node.getAttribute('style') || '')) {
+        node.removeAttribute('style');
+      }
+    });
 
     await nextFrame(isolatedWindow);
 
@@ -217,6 +234,7 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
       imageTimeout: 15000,
       logging: false,
       removeContainer: true,
+      foreignObjectRendering: true,
     });
 
     if (!canvas.width || !canvas.height) {
@@ -247,13 +265,21 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   const pdfHeight = pdf.internal.pageSize.getHeight();
   const imageWidthPx = canvas.width;
   const imageHeightPx = canvas.height;
-  const imageWidthMm = pdfWidth;
-  const imageHeightMm = (imageHeightPx * imageWidthMm) / imageWidthPx;
+  const imageHeightMm = (imageHeightPx * pdfWidth) / imageWidthPx;
 
   if (imageHeightMm <= pdfHeight + 0.01) {
-    pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imageWidthMm, imageHeightMm, undefined, 'FAST');
+    pdf.addImage(
+      canvas.toDataURL('image/jpeg', 0.95),
+      'JPEG',
+      0,
+      0,
+      pdfWidth,
+      imageHeightMm,
+      undefined,
+      'FAST',
+    );
   } else {
-    const pageCanvasHeight = Math.max(1, Math.floor((imageWidthPx * pdfHeight) / imageWidthMm));
+    const pageCanvasHeight = Math.max(1, Math.floor((imageWidthPx * pdfHeight) / pdfWidth));
     let offsetY = 0;
     let pageIndex = 0;
 
@@ -270,8 +296,17 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
       ctx.drawImage(canvas, 0, offsetY, imageWidthPx, sliceHeight, 0, 0, imageWidthPx, sliceHeight);
 
       if (pageIndex > 0) pdf.addPage();
-      const sliceHeightMm = (sliceHeight * imageWidthMm) / imageWidthPx;
-      pdf.addImage(pageCanvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imageWidthMm, sliceHeightMm, undefined, 'FAST');
+      const sliceHeightMm = (sliceHeight * pdfWidth) / imageWidthPx;
+      pdf.addImage(
+        pageCanvas.toDataURL('image/jpeg', 0.95),
+        'JPEG',
+        0,
+        0,
+        pdfWidth,
+        sliceHeightMm,
+        undefined,
+        'FAST',
+      );
 
       offsetY += sliceHeight;
       pageIndex += 1;
