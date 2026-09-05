@@ -140,10 +140,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const buildExpensePath = () => {
     if (!chartData.length) return '';
     const points = chartData.map((point, index) => ({
-      x: chartData.length === 1 ? 50 : 4 + (index / (chartData.length - 1)) * 94,
+      x: chartData.length === 1 ? 56 : 14 + (index / (chartData.length - 1)) * 84,
       y: 86 - (point.expense / paymentMax) * 70,
     }));
-    if (points.length === 1) return `M 4 ${points[0].y} L 98 ${points[0].y}`;
+    if (points.length === 1) return `M 14 ${points[0].y} L 98 ${points[0].y}`;
     return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
   };
 
@@ -192,20 +192,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {paymentTicks.slice().reverse().map((tick) => <span key={tick}>{formatAxisAmount(tick)}</span>)}
             </div>
 
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute left-14 right-2 top-8 bottom-6 w-auto h-auto">
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
               <defs>
                 <linearGradient id="glassRose" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#fb7185" stopOpacity="0.45" /><stop offset="50%" stopColor="#f43f5e" stopOpacity="0.9" /><stop offset="100%" stopColor="#fb7185" stopOpacity="0.58" /></linearGradient>
                 <filter id="softRose" x="-10%" y="-30%" width="120%" height="160%"><feGaussianBlur stdDeviation="0.55" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
               </defs>
               <g stroke="#64748b" strokeOpacity="0.10" strokeWidth="0.2" vectorEffect="non-scaling-stroke">
-                {paymentTicks.map((tick, index) => { const y = 86 - (index / tickCount) * 70; return <line key={`h-${tick}`} x1="0" y1={y} x2="100" y2={y} />; })}
-                {chartData.map((_, index) => { const x = chartData.length === 1 ? 50 : 4 + (index / (chartData.length - 1)) * 94; return <line key={`v-${index}`} x1={x} y1="16" x2={x} y2="86" strokeOpacity="0.045" />; })}
+                {paymentTicks.map((tick, index) => { const y = 86 - (index / tickCount) * 70; return <line key={`h-${tick}`} x1="14" y1={y} x2="98" y2={y} />; })}
+                {chartData.map((_, index) => { const x = chartData.length === 1 ? 56 : 14 + (index / (chartData.length - 1)) * 84; return <line key={`v-${index}`} x1={x} y1="16" x2={x} y2="86" strokeOpacity="0.045" />; })}
               </g>
-              <line x1="0" y1="86" x2="100" y2="86" stroke="#64748b" strokeOpacity="0.18" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
+              <line x1="14" y1="86" x2="98" y2="86" stroke="#64748b" strokeOpacity="0.18" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
               <path d={expenseLinePath} fill="none" stroke="#fb7185" strokeOpacity="0.10" strokeWidth="1.8" strokeLinecap="round" vectorEffect="non-scaling-stroke" filter="url(#softRose)" />
               <path d={expenseLinePath} fill="none" stroke="url(#glassRose)" strokeWidth="0.8" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
               {chartData.map((point, index) => {
-                const x = chartData.length === 1 ? 50 : 4 + (index / (chartData.length - 1)) * 94;
+                const x = chartData.length === 1 ? 56 : 14 + (index / (chartData.length - 1)) * 84;
                 const y = 86 - (point.expense / paymentMax) * 70;
                 return <circle key={`${point.label}-${index}`} cx={x} cy={y} r="0.58" fill="#fff" stroke="#f43f5e" strokeWidth="0.42" vectorEffect="non-scaling-stroke" />;
               })}
