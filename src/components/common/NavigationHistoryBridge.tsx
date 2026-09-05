@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 
 const HISTORY_KEY = 'together-events-navigation';
+const TAB_KEY = 'together-events-current-tab';
 
 type NavigationState = {
   key: typeof HISTORY_KEY;
@@ -15,13 +16,16 @@ const isNavigationState = (value: unknown): value is NavigationState => {
 
 export function NavigationHistoryBridge() {
   useEffect(() => {
+    const savedTab = sessionStorage.getItem(TAB_KEY) || 'dashboard';
     const currentState = window.history.state;
     if (!isNavigationState(currentState)) {
       window.history.replaceState(
-        { key: HISTORY_KEY, tab: 'dashboard' } satisfies NavigationState,
+        { key: HISTORY_KEY, tab: savedTab } satisfies NavigationState,
         '',
         window.location.href,
       );
+    } else {
+      sessionStorage.setItem(TAB_KEY, currentState.tab);
     }
 
     let restoringFromBack = false;
@@ -34,6 +38,7 @@ export function NavigationHistoryBridge() {
 
       const tab = button.id.replace(/^nav-/, '');
       if (!tab) return;
+      sessionStorage.setItem(TAB_KEY, tab);
 
       const current = window.history.state;
       if (isNavigationState(current) && current.tab === tab) return;
@@ -49,6 +54,7 @@ export function NavigationHistoryBridge() {
       const state = event.state;
       if (!isNavigationState(state)) return;
 
+      sessionStorage.setItem(TAB_KEY, state.tab);
       const button = document.getElementById(`nav-${state.tab}`) as HTMLButtonElement | null;
       if (!button) return;
 
