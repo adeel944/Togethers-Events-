@@ -10,7 +10,7 @@ async function getBusinessId(): Promise<string> {
 }
 
 function mapBookingVendor(row: any): BookingVendor {
-  return { id: row.id, vendorId: row.vendor_id, vendorName: row.vendor_name, category: row.category, agreedAmount: Number(row.agreed_amount || 0), paymentStatus: row.payment_status || 'Pending', paidAmount: Number(row.paid_amount || 0), paymentDate: row.payment_date || undefined, paymentMethod: row.payment_method || undefined, paymentNotes: row.payment_notes || undefined, notes: row.notes || '' };
+  return { id: row.id, vendorId: row.vendor_id, vendorName: row.vendor_name || '', category: row.category || 'Other', agreedAmount: Number(row.agreed_amount || 0), paymentStatus: row.payment_status || 'Pending', paidAmount: Number(row.paid_amount || 0), paymentDate: row.payment_date || undefined, paymentMethod: row.payment_method || undefined, paymentNotes: row.payment_notes || undefined, notes: row.notes || '' };
 }
 
 function mapBooking(row: any, vendorRows: any[] = [], clientName = ''): Booking {
@@ -21,7 +21,13 @@ async function getVendorRows(bookingIds: string[]): Promise<any[]> {
   if (!bookingIds.length) return [];
   const { data, error } = await supabase.from('booking_vendors').select('*').in('booking_id', bookingIds);
   if (error) { console.warn('Could not load booking vendors; continuing without vendor assignments:', error); return []; }
-  return data || [];
+  const rows = data || [];
+  const vendorIds = [...new Set(rows.map((row: any) => row.vendor_id).filter(Boolean))];
+  if (!vendorIds.length) return rows;
+  const { data: vendors, error: vendorError } = await supabase.from('vendors').select('id,vendor_name,category').in('id', vendorIds);
+  if (vendorError) { console.warn('Could not load vendor details:', vendorError); return rows; }
+  const vendorMap = Object.fromEntries((vendors || []).map((v: any) => [v.id, v]));
+  return rows.map((row: any) => ({ ...row, vendor_name: row.vendor_name || vendorMap[row.vendor_id]?.vendor_name || '', category: row.category || vendorMap[row.vendor_id]?.category || 'Other' }));
 }
 
 async function getClientNames(clientIds: string[]): Promise<Record<string, string>> {
@@ -44,7 +50,7 @@ async function loadBookingsForBusiness(businessId: string): Promise<any[]> {
   return legacyBookings || [];
 }
 
-const vendorDbPayload = (vendor: BookingVendor) => ({ vendor_id: vendor.vendorId, vendor_name: vendor.vendorName, category: vendor.category, agreed_amount: Number(vendor.agreedAmount || 0), payment_status: vendor.paymentStatus || 'Pending', paid_amount: Number(vendor.paidAmount || 0), payment_date: vendor.paymentDate || null, payment_method: vendor.paymentMethod || null, payment_notes: vendor.paymentNotes || null, notes: vendor.notes || '' });
+const vendorDbPayload = (vendor: BookingVendor) => ({ vendor_id: vendor.vendorId, agreed_amount: Number(vendor.agreedAmount || 0), payment_status: vendor.paymentStatus || 'Pending', paid_amount: Number(vendor.paidAmount || 0), payment_date: vendor.paymentDate || null, payment_method: vendor.paymentMethod || null, payment_notes: vendor.paymentNotes || null, notes: vendor.notes || '' });
 
 export const bookingService = {
   async getBookings(): Promise<Booking[]> {
