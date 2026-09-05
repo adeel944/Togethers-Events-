@@ -44,11 +44,133 @@ async function loadBookingsForBusiness(businessId: string): Promise<any[]> {
   return primary.data || [];
 }
 
+function normalizeDate(value: unknown): string {
+  const raw = String(value || '').trim();
+  const iso = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (iso) return `${iso[1]}-${String(Number(iso[2])).padStart(2, '0')}-${String(Number(iso[3])).padStart(2, '0')}`;
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+  return '';
+}
+
+function readLegacyPayments(): any[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem('together-events-vendor-payments-v1');
+    const data = raw ? JSON.parse(raw) : [];
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+async function repairInvoiceBookingsAndVendorPayments(businessId: string): Promise<void> {
+  // Existing invoices created before booking sync was made durable can have booking_id = NULL.
+  const { data: invoices, error } = await supabase.from('invoices').select('*').eq('business_id', businessId);
+  if (error) throw error;
+  if (!invoices?.length) return;
+
+  let bookings = await loadBookingsForBusiness(businessId);
+  const legacyPayments = readLegacyPayments();
+
+  for (const invoice of invoices) {
+    const eventDate = normalizeDate(invoice.event_date);
+    if (!invoice.client_id || !invoice.event_type || !eventDate) continue;
+
+    let booking = invoice.booking_id ? bookings.find((b: any) => b.id === invoice.booking_id) : undefined;
+    if (!booking) {
+      booking = bookings.find((b: any) =>
+        b.client_id === invoice.client_id &&
+        normalizeDate(b.event_date) === eventDate &&
+        b.event_type === invoice.event_type &&
+        Math.abs(Number(b.total_amount || 0) - Number(invoice.total_amount || 0)) < 0.01
+      );
+    }
+
+    if (!booking) {
+      const totalAmount = Number(invoice.total_amount || 0);
+      const advancePaid = Number(invoice.advance_paid || 0);
+      const { data: created, error: createError } = await supabase.from('bookings').insert({
+        business_id: businessId,
+        client_id: invoice.client_id,
+        event_type: invoice.event_type,
+        event_date: eventDate,
+        event_time: invoice.event_time || '',
+        venue: invoice.venue || '',
+        guest_count: Number(invoice.guest_count || 0),
+        package: 'Custom Package',
+        total_amount: totalAmount,
+        advance_paid: advancePaid,
+        booking_status: 'Confirmed',
+        notes: invoice.notes || '',
+      }).select('*').single();
+      if (createError) {
+        console.warn(`Could not create booking for invoice ${invoice.invoice_number}:`, createError.message);
+        continue;
+      }
+      booking = created;
+      bookings = [booking, ...bookings];
+    }
+
+    if (invoice.booking_id !== booking.id) {
+      const { error: linkError } = await supabase.from('invoices').update({ booking_id: booking.id, event_date: eventDate }).eq('id', invoice.id).eq('business_id', businessId);
+      if (linkError) console.warn(`Could not link invoice ${invoice.invoice_number}:`, linkError.message);
+    }
+
+    const invoicePayments = legacyPayments.filter((p) => String(p.invoiceId || '') === String(invoice.id) && String(p.vendorId || ''));
+    if (!invoicePayments.length) continue;
+
+    const grouped = new Map<string, any>();
+    for (const payment of invoicePayments) {
+      const vendorId = String(payment.vendorId || '');
+      const current = grouped.get(vendorId) || { vendorId, amount: 0, totalAmount: 0, date: '', method: '', notes: '' };
+      current.amount += Number(payment.amount || 0);
+      current.totalAmount = Math.max(current.totalAmount, Number(payment.totalAmount || 0));
+      current.date = current.date || payment.date || '';
+      current.method = current.method || payment.method || '';
+      current.notes = current.notes || payment.notes || '';
+      grouped.set(vendorId, current);
+    }
+
+    for (const payment of grouped.values()) {
+      const { data: existingRows, error: existingError } = await supabase.from('booking_vendors').select('*').eq('booking_id', booking.id).eq('business_id', businessId).eq('vendor_id', payment.vendorId);
+      if (existingError) {
+        console.warn('Could not read booking vendor assignment:', existingError.message);
+        continue;
+      }
+      const existing = existingRows?.[0];
+      const agreedAmount = Math.max(Number(existing?.agreed_amount || 0), Number(payment.totalAmount || 0));
+      const paidAmount = Math.min(Math.max(agreedAmount, Number(payment.amount || 0)), Number(payment.amount || 0));
+      const status = agreedAmount > 0 && paidAmount >= agreedAmount ? 'Paid' : paidAmount > 0 ? 'Partial' : 'Pending';
+      const payload = {
+        business_id: businessId,
+        booking_id: booking.id,
+        vendor_id: payment.vendorId,
+        agreed_amount: agreedAmount,
+        payment_status: status,
+        paid_amount: paidAmount,
+        payment_date: payment.date || null,
+        payment_method: payment.method || null,
+        payment_notes: payment.notes || null,
+        notes: existing?.notes || '',
+      };
+      if (existing) {
+        const { error: updateError } = await supabase.from('booking_vendors').update(payload).eq('id', existing.id).eq('business_id', businessId);
+        if (updateError) console.warn('Could not sync legacy vendor payment:', updateError.message);
+      } else {
+        const { error: insertError } = await supabase.from('booking_vendors').insert(payload);
+        if (insertError) console.warn('Could not insert legacy vendor payment:', insertError.message);
+      }
+    }
+  }
+}
+
 const vendorDbPayload = (vendor: BookingVendor) => ({ vendor_id: vendor.vendorId, agreed_amount: Number(vendor.agreedAmount || 0), payment_status: vendor.paymentStatus || 'Pending', paid_amount: Number(vendor.paidAmount || 0), payment_date: vendor.paymentDate || null, payment_method: vendor.paymentMethod || null, payment_notes: vendor.paymentNotes || null, notes: vendor.notes || '' });
 
 export const bookingService = {
   async getBookings(): Promise<Booking[]> {
     const businessId = await getBusinessId();
+    try { await repairInvoiceBookingsAndVendorPayments(businessId); } catch (error) { console.warn('Booking repair skipped:', error); }
     const rows = await loadBookingsForBusiness(businessId);
     const [vendorRows, clientNames] = await Promise.all([getVendorRows(rows.map((row) => row.id)), getClientNames(rows.map((row) => row.client_id))]);
     return rows.map((row) => mapBooking(row, vendorRows.filter((v) => v.booking_id === row.id), clientNames[row.client_id] || ''));
