@@ -15,6 +15,42 @@ const waitForInvoiceAssets = async (element: HTMLElement) => {
 
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
+/** html2canvas 1.x cannot parse modern CSS color functions such as oklch().
+ * Copy the browser's resolved RGB colors onto the export clone so the renderer
+ * never has to parse the original OKLCH declarations from Tailwind/global CSS.
+ */
+const normalizeExportColors = (root: HTMLElement) => {
+  const nodes = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))];
+  const colorProps = [
+    'color',
+    'backgroundColor',
+    'borderTopColor',
+    'borderRightColor',
+    'borderBottomColor',
+    'borderLeftColor',
+    'outlineColor',
+    'textDecorationColor',
+    'columnRuleColor',
+    'caretColor',
+  ] as const;
+
+  for (const node of nodes) {
+    const computed = window.getComputedStyle(node);
+    for (const prop of colorProps) {
+      const value = computed[prop];
+      if (value && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)') {
+        node.style[prop] = value;
+      }
+    }
+
+    const shadow = computed.boxShadow;
+    if (shadow && shadow !== 'none') node.style.boxShadow = shadow;
+
+    const textShadow = computed.textShadow;
+    if (textShadow && textShadow !== 'none') node.style.textShadow = textShadow;
+  }
+};
+
 export const downloadInvoicePdf = async (elementId: string, invoiceNumber: string): Promise<void> => {
   const source = document.getElementById(elementId) as HTMLElement | null;
   if (!source) throw new Error('Invoice preview element not found.');
@@ -22,7 +58,6 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   await waitForInvoiceAssets(source);
   await nextFrame();
 
-  // Render a clean, fixed-width clone instead of the horizontally scrollable preview wrapper.
   const clone = source.cloneNode(true) as HTMLElement;
   clone.setAttribute('data-pdf-export', 'true');
   clone.style.position = 'fixed';
@@ -40,6 +75,7 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
 
   try {
     await waitForInvoiceAssets(clone);
+    normalizeExportColors(clone);
     await nextFrame();
 
     const width = Math.max(clone.scrollWidth, clone.clientWidth, 794);
@@ -60,6 +96,10 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
       windowHeight: Math.max(height, 900),
       scrollX: 0,
       scrollY: 0,
+      onclone: (clonedDocument) => {
+        const clonedRoot = clonedDocument.querySelector('[data-pdf-export="true"]') as HTMLElement | null;
+        if (clonedRoot) normalizeExportColors(clonedRoot);
+      },
     });
 
     if (!canvas.width || !canvas.height) throw new Error('Could not render invoice for PDF.');
@@ -100,7 +140,6 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
       const link = document.createElement('a');
       link.href = url;
       link.download = filename;
-      link.target = '_blank';
       link.rel = 'noopener';
       link.style.display = 'none';
       document.body.appendChild(link);
