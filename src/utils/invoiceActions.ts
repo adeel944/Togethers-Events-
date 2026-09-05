@@ -17,14 +17,11 @@ const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() 
 
 /**
  * html2canvas 1.x cannot parse modern CSS color functions such as oklch()/oklab().
- * The important detail is that html2canvas can still inspect CSS rules from the
- * cloned document, so changing only inline colors is not sufficient. We build a
- * fully self-contained export clone: copy computed styles inline, remove stylesheets,
- * and drop any remaining property whose value contains an unsupported color function.
+ * It is also important that the export clone is the actual invoice sheet rather
+ * than the responsive preview wrapper, otherwise responsive padding/max-width rules
+ * can make the PDF look enlarged or cause text to overlap.
  */
 const legacyColorContext = document.createElement('canvas').getContext('2d');
-
-const isModernColor = (value: string) => /\b(?:oklch|oklab|color)\s*\(/i.test(String(value || ''));
 
 const toLegacyColor = (value: string): string => {
   const raw = String(value || '').trim();
@@ -34,99 +31,47 @@ const toLegacyColor = (value: string): string => {
   try {
     legacyColorContext.fillStyle = '#000000';
     legacyColorContext.fillStyle = raw;
-    const resolved = legacyColorContext.fillStyle;
-    return resolved || raw;
+    return legacyColorContext.fillStyle || raw;
   } catch {
     return raw;
   }
 };
 
-const COLOR_PROPS = new Set([
-  'color',
-  'background-color',
-  'border-top-color',
-  'border-right-color',
-  'border-bottom-color',
-  'border-left-color',
-  'outline-color',
-  'text-decoration-color',
-  'column-rule-color',
-  'caret-color',
-  'accent-color',
-  'fill',
-  'stroke',
-]);
+const normalizeExportColors = (root: HTMLElement) => {
+  const nodes = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))];
+  const colorProps = [
+    'color',
+    'backgroundColor',
+    'borderTopColor',
+    'borderRightColor',
+    'borderBottomColor',
+    'borderLeftColor',
+    'outlineColor',
+    'textDecorationColor',
+    'columnRuleColor',
+    'caretColor',
+  ] as const;
 
-const RISKY_COLOR_PROPS = new Set([
-  'background',
-  'background-image',
-  'border-image',
-  'border-image-source',
-  'box-shadow',
-  'text-shadow',
-  'filter',
-  'backdrop-filter',
-  'mask',
-  'mask-image',
-  'mask-border',
-  'clip-path',
-]);
-
-const copyComputedStylesSafely = (source: HTMLElement, target: HTMLElement) => {
-  const computed = window.getComputedStyle(source);
-  target.removeAttribute('class');
-
-  for (let i = 0; i < computed.length; i += 1) {
-    const property = computed[i];
-    const value = computed.getPropertyValue(property);
-    if (!property || value === '') continue;
-
-    const normalizedProperty = property.toLowerCase();
-
-    if (COLOR_PROPS.has(normalizedProperty)) {
-      target.style.setProperty(property, toLegacyColor(value));
-      continue;
-    }
-
-    if (isModernColor(value)) {
-      // html2canvas may parse these even when they come from a non-color shorthand.
-      // For gradients/shadows/masks, dropping the decoration is safer than failing
-      // the entire PDF. The underlying layout and solid colors remain intact.
-      if (RISKY_COLOR_PROPS.has(normalizedProperty)) {
-        if (normalizedProperty === 'background' || normalizedProperty === 'background-image') {
-          target.style.setProperty('background-image', 'none');
-        } else if (normalizedProperty === 'box-shadow' || normalizedProperty === 'text-shadow') {
-          target.style.setProperty(normalizedProperty, 'none');
-        } else {
-          target.style.setProperty(normalizedProperty, 'none');
-        }
+  for (const node of nodes) {
+    const computed = window.getComputedStyle(node);
+    for (const prop of colorProps) {
+      const value = computed[prop];
+      if (value && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)') {
+        node.style[prop] = toLegacyColor(value);
       }
-      continue;
     }
 
-    // Avoid copying browser-owned/internal properties that cannot be reassigned.
-    try {
-      target.style.setProperty(property, value);
-    } catch {
-      // Ignore an individual CSS property and continue exporting.
+    if (computed.boxShadow && computed.boxShadow !== 'none') node.style.boxShadow = 'none';
+    if (computed.textShadow && computed.textShadow !== 'none') node.style.textShadow = 'none';
+
+    if (/\b(?:oklch|oklab|color\()\s*\(/i.test(computed.backgroundImage || '')) {
+      node.style.backgroundImage = 'none';
     }
-  }
-
-  target.style.setProperty('animation', 'none');
-  target.style.setProperty('transition', 'none');
-}
-
-const normalizeExportTree = (root: HTMLElement) => {
-  const sourceNodes = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))];
-  const targetNodes = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))];
-
-  for (let i = 0; i < targetNodes.length; i += 1) {
-    if (sourceNodes[i] && targetNodes[i]) copyComputedStylesSafely(sourceNodes[i], targetNodes[i]);
   }
 };
 
-const stripStylesheets = (doc: Document) => {
-  doc.querySelectorAll('style, link[rel="stylesheet"]').forEach((node) => node.remove());
+const stripUnsupportedStylesheets = (clone: HTMLElement) => {
+  clone.querySelectorAll('style, link[rel="stylesheet"]').forEach((node) => node.remove());
 };
 
 export const downloadInvoicePdf = async (elementId: string, invoiceNumber: string): Promise<void> => {
@@ -136,31 +81,57 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   await waitForInvoiceAssets(source);
   await nextFrame();
 
-  // Capture only a fixed A4-like width, not the horizontally scrollable UI wrapper.
-  const clone = source.cloneNode(true) as HTMLElement;
+  // The preview wrapper is responsive and has its own padding/overflow. Export
+  // the real invoice sheet so the saved PDF has exactly the same proportions as
+  // the visible invoice instead of scaling the whole dashboard card.
+  const invoiceSheet = source.querySelector<HTMLElement>('.print-container') || source;
+  const clone = invoiceSheet.cloneNode(true) as HTMLElement;
   clone.setAttribute('data-pdf-export', 'true');
+
+  // 794 CSS px is the standard 96-DPI width corresponding to an A4 page.
+  // Keep the internal invoice layout at this exact width; jsPDF then maps it 1:1
+  // to the A4 page width without enlarging the typography.
   clone.style.position = 'fixed';
   clone.style.left = '-100000px';
   clone.style.top = '0';
   clone.style.width = '794px';
+  clone.style.minWidth = '794px';
   clone.style.maxWidth = '794px';
   clone.style.height = 'auto';
+  clone.style.minHeight = '0';
   clone.style.maxHeight = 'none';
+  clone.style.margin = '0';
   clone.style.overflow = 'visible';
   clone.style.background = '#ffffff';
   clone.style.boxSizing = 'border-box';
+  clone.style.boxShadow = 'none';
+  clone.style.transform = 'none';
   clone.style.zIndex = '-1';
+
+  // Keep all descendants constrained to the invoice page instead of allowing
+  // max-width/responsive wrapper classes to re-expand them on the hidden clone.
+  const pageNodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
+  for (const node of pageNodes) {
+    if (node !== clone) {
+      const computed = window.getComputedStyle(node);
+      if (computed.boxSizing === 'border-box') node.style.boxSizing = 'border-box';
+    }
+    node.style.maxWidth = node.style.maxWidth || '100%';
+  }
+
   document.body.appendChild(clone);
 
   try {
+    // Ensure the export clone has no external stylesheet declarations left that
+    // could re-introduce unsupported color functions inside html2canvas.
+    stripUnsupportedStylesheets(clone);
     await waitForInvoiceAssets(clone);
-    normalizeExportTree(clone);
+    normalizeExportColors(clone);
     await nextFrame();
 
-    const width = Math.max(clone.scrollWidth, clone.clientWidth, 794);
+    const width = 794;
     const height = Math.max(clone.scrollHeight, clone.clientHeight, 1);
-    const maxCanvasDimension = 9000;
-    const scale = Math.max(1, Math.min(2, maxCanvasDimension / Math.max(width, height)));
+    const scale = Math.min(2, Math.max(1, 1600 / Math.max(width, height)));
 
     const canvas = await html2canvas(clone, {
       scale,
@@ -172,18 +143,14 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
       width,
       height,
       windowWidth: width,
-      windowHeight: Math.max(height, 900),
+      windowHeight: Math.max(height, 1000),
       scrollX: 0,
       scrollY: 0,
       onclone: (clonedDocument) => {
         const clonedRoot = clonedDocument.querySelector('[data-pdf-export="true"]') as HTMLElement | null;
         if (!clonedRoot) return;
-        stripStylesheets(clonedDocument);
-        normalizeExportTree(clonedRoot);
-        clonedRoot.style.setProperty('width', '794px');
-        clonedRoot.style.setProperty('max-width', '794px');
-        clonedRoot.style.setProperty('overflow', 'visible');
-        clonedRoot.style.setProperty('background', '#ffffff');
+        stripUnsupportedStylesheets(clonedRoot);
+        normalizeExportColors(clonedRoot);
       },
     });
 
