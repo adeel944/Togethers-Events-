@@ -13,7 +13,13 @@ async function getBusinessId(): Promise<string> {
   return data.business_id;
 }
 
-const PROFESSIONAL_DEFAULT_TERMS = `1. A 30% non-refundable advance is required to confirm the booking and reserve the event date.\n2. 50% of the remaining amount is payable 14 days before the event.\n3. The outstanding balance must be cleared before the event begins.\n4. Any changes to the agreed services, guest count, menu or setup must be communicated at least 7 days in advance and may affect the final charges.\n5. Advance payments are non-refundable in case of cancellation by the client.\n6. Final arrangements are subject to venue access, availability and the agreed event schedule.\n7. Together Events is not responsible for delays or loss caused by weather, venue restrictions, natural events or circumstances beyond reasonable control.`;
+const PROFESSIONAL_DEFAULT_TERMS = `1. A 30% non-refundable advance is required to confirm the booking and reserve the event date.
+2. 50% of the remaining amount is payable 14 days before the event.
+3. The outstanding balance must be cleared before the event begins.
+4. Any changes to the agreed services, guest count, menu or setup must be communicated at least 7 days in advance and may affect the final charges.
+5. Advance payments are non-refundable in case of cancellation by the client.
+6. Final arrangements are subject to venue access, availability and the agreed event schedule.
+7. Together Events is not responsible for delays or loss caused by weather, venue restrictions, natural events or circumstances beyond reasonable control.`;
 
 const VALID_TEMPLATE_IDS = new Set(['classic','clean','compact','corporate','elegant','minimal','modern','premium-minimal','professional','simple-lines']);
 
@@ -46,8 +52,20 @@ async function replaceItems(invoiceId: string, items: InvoiceItem[]) {
   const { error } = await supabase.from('invoice_items').insert(rows); if (error) throw error;
 }
 
-const DB_EVENT_TYPES = new Set(['Baraat', 'Walima', 'Mehendi', 'Nikkah', 'Birthday', 'Corporate', 'Other']);
-function normalizeEventType(value: unknown): string { const eventType = String(value || '').trim(); return DB_EVENT_TYPES.has(eventType) ? eventType : 'Other'; }
+const DB_EVENT_TYPES = new Set(['Mehndi', 'Baraat', 'Walima', 'Nikkah', 'Birthday', 'Corporate', 'Other']);
+function normalizeEventType(value: unknown): string {
+  const eventType = String(value || '').trim();
+  const aliases: Record<string, string> = {
+    Mehendi: 'Mehndi',
+    'Qawwali Night': 'Other',
+    Reception: 'Other',
+    Engagement: 'Other',
+    'Corporate Gala': 'Corporate',
+    Concert: 'Other',
+  };
+  const normalized = aliases[eventType] || eventType;
+  return DB_EVENT_TYPES.has(normalized) ? normalized : 'Other';
+}
 function normalizeTemplateId(value: unknown): string { const templateId = String(value || '').trim(); return VALID_TEMPLATE_IDS.has(templateId) ? templateId : 'modern'; }
 function normalizeDate(value: unknown): string | null { const raw = String(value || '').trim(); if (!raw) return null; const iso = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/); if (iso) return `${iso[1]}-${String(Number(iso[2])).padStart(2, '0')}-${String(Number(iso[3])).padStart(2, '0')}`; const parsed = new Date(raw); if (!Number.isNaN(parsed.getTime())) return `${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`; return null; }
 
@@ -62,8 +80,8 @@ export const invoiceService = {
     const subtotal = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
     const discount = Math.min(Math.max(0, Number(payload.discount) || 0), subtotal);
     const tax = Math.max(0, Number(payload.tax) || 0);
-    const totalAmount = Math.max(subtotal - discount + tax, 0);
     const rawAdvancePaid = Math.max(0, Number(payload.advancePaid) || 0);
+    const totalAmount = Math.max(subtotal - discount + tax, 0);
     const advancePaid = Math.min(rawAdvancePaid, totalAmount);
     const today = new Date().toISOString().split('T')[0];
     const invoiceNumber = String(payload.invoiceNumber || '').trim();
