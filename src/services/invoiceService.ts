@@ -1,4 +1,4 @@
-import { Invoice, InvoiceItem } from '../types';
+import { Invoice, InvoiceItem, PaymentStatus } from '../types';
 import { supabase } from '../lib/supabase';
 import { businessService } from './businessService';
 import { bookingService } from './bookingService';
