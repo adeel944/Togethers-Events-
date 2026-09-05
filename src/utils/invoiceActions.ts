@@ -49,11 +49,11 @@ const sanitizeComputedValue = (property: string, value: string, computed: CSSSty
 };
 
 /**
- * Render the invoice in a real desktop-sized iframe. This is intentionally
- * NOT based on computed styles from the live preview: on phones that would
- * freeze the mobile responsive styles and then place them into a desktop PDF.
- * The iframe viewport is desktop width, so Tailwind sm/md rules resolve as
- * they do on the PC. The original classes remain intact during rendering.
+ * Build the invoice in a desktop-width iframe and freeze ALL computed styles
+ * as legacy inline CSS. This keeps the successful desktop layout while making
+ * html2canvas completely independent from Tailwind's oklab()/oklch() values.
+ * Because the computed styles are obtained inside the 896px iframe, mobile
+ * responsive styles are never copied into the PDF.
  */
 const buildDesktopInvoice = async (source: HTMLElement, doc: Document, win: Window, width: number) => {
   const clone = source.cloneNode(true) as HTMLElement;
@@ -70,9 +70,6 @@ const buildDesktopInvoice = async (source: HTMLElement, doc: Document, win: Wind
   clone.style.backgroundColor = '#ffffff';
   clone.style.boxSizing = 'border-box';
 
-  // Copy application styles so Tailwind responsive utilities are available.
-  // The iframe width makes the clone render with desktop breakpoints even when
-  // the user started the download from a narrow mobile screen.
   for (const node of Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))) {
     doc.head.appendChild(node.cloneNode(true));
   }
@@ -81,12 +78,28 @@ const buildDesktopInvoice = async (source: HTMLElement, doc: Document, win: Wind
   await waitForInvoiceAssets(clone, doc);
   await nextFrame(win);
 
-  // Freeze only the problematic modern color functions. Keep the layout CSS
-  // native so flex/grid/text sizing cannot be distorted by mobile styles.
   const nodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
   for (const node of nodes) {
     const computed = win.getComputedStyle(node);
-    const pairs: Array<[string, string]> = [
+    const properties: Array<[string, string]> = [];
+
+    for (let p = 0; p < computed.length; p += 1) {
+      const property = computed.item(p);
+      if (!property || property.startsWith('--')) continue;
+      const rawValue = computed.getPropertyValue(property);
+      if (!rawValue) continue;
+      const safeValue = sanitizeComputedValue(property, rawValue, computed);
+      if (safeValue !== null) properties.push([property, safeValue]);
+    }
+
+    node.removeAttribute('class');
+    node.removeAttribute('style');
+
+    for (const [property, value] of properties) {
+      try { node.style.setProperty(property, value); } catch { /* ignore */ }
+    }
+
+    const colorPairs: Array<[string, string]> = [
       ['color', computed.color],
       ['background-color', computed.backgroundColor],
       ['border-top-color', computed.borderTopColor],
@@ -96,21 +109,27 @@ const buildDesktopInvoice = async (source: HTMLElement, doc: Document, win: Wind
       ['outline-color', computed.outlineColor],
       ['text-decoration-color', computed.textDecorationColor],
     ];
-    for (const [property, value] of pairs) {
+    for (const [property, value] of colorPairs) {
       if (!value || value === 'transparent') continue;
       try { node.style.setProperty(property, toLegacyColor(value)); } catch { /* ignore */ }
     }
+
     for (const attribute of ['fill', 'stroke', 'stop-color', 'flood-color', 'lighting-color', 'color']) {
       const value = node.getAttribute(attribute);
       if (value && unsupportedColorPattern.test(value)) node.setAttribute(attribute, toLegacyColor(value));
     }
   }
 
+  clone.style.position = 'static';
+  clone.style.margin = '0';
   clone.style.width = `${width}px`;
   clone.style.minWidth = `${width}px`;
   clone.style.maxWidth = `${width}px`;
   clone.style.height = 'auto';
+  clone.style.minHeight = '0';
   clone.style.overflow = 'visible';
+  clone.style.backgroundColor = '#ffffff';
+  clone.style.boxSizing = 'border-box';
   return clone;
 };
 
@@ -118,9 +137,6 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
   await waitForInvoiceAssets(invoiceSheet);
   await nextFrame();
 
-  // InvoiceDocument uses max-w-4xl (896px). Render at that natural desktop
-  // width instead of forcing 794px. We then scale it down only when placing it
-  // on A4, preventing horizontal cropping and preserving the intended layout.
   const DESKTOP_CSS_WIDTH = 896;
   const iframe = document.createElement('iframe');
   iframe.setAttribute('aria-hidden', 'true');
@@ -194,8 +210,6 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const cssPxToMm = 25.4 / 96;
-
-  // Fit the 896px desktop invoice proportionally inside A4. No horizontal crop.
   const maxWidthMm = pageWidth - 4;
   const naturalWidthMm = cssWidth * cssPxToMm;
   const scale = Math.min(1, maxWidthMm / naturalWidthMm);
@@ -206,7 +220,6 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   if (imageHeightMm <= pageHeight) {
     pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', leftMargin, 0, imageWidthMm, imageHeightMm, undefined, 'FAST');
   } else {
-    // Slice the rendered canvas according to the scaled PDF page height.
     const pageCssHeight = pageHeight / cssPxToMm / scale;
     const pageCanvasHeight = Math.max(1, Math.floor(pageCssHeight * 2));
     let offsetY = 0;
