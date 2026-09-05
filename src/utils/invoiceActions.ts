@@ -59,17 +59,14 @@ const sanitizeComputedValue = (property: string, value: string, computed: CSSSty
     return 'none';
   }
 
-  if (property === 'background') {
-    return toLegacyColor(computed.backgroundColor);
-  }
-
+  if (property === 'background') return toLegacyColor(computed.backgroundColor);
   return null;
 };
 
 /**
  * Rebuild the invoice using only inline, browser-computed CSS values.
- * The isolated iframe has no application stylesheets, which prevents Tailwind
- * color functions such as oklab()/oklch() from reaching html2canvas's parser.
+ * The isolated iframe has no application stylesheets, preventing Tailwind's
+ * oklab()/oklch() color functions from reaching html2canvas's parser.
  */
 const buildIsolatedInvoice = (source: HTMLElement) => {
   const sourceNodes = [source, ...Array.from(source.querySelectorAll<HTMLElement>('*'))];
@@ -122,16 +119,7 @@ const buildIsolatedInvoice = (source: HTMLElement) => {
       }
     }
 
-    // Presentation attributes can also carry CSS colors (notably SVG content).
-    // Convert/remove those explicitly so html2canvas never sees oklab/oklch here.
-    for (const attribute of [
-      'fill',
-      'stroke',
-      'stop-color',
-      'flood-color',
-      'lighting-color',
-      'color',
-    ]) {
+    for (const attribute of ['fill', 'stroke', 'stop-color', 'flood-color', 'lighting-color', 'color']) {
       const value = cloneNode.getAttribute(attribute);
       if (value && unsupportedColorPattern.test(value)) {
         cloneNode.setAttribute(attribute, toLegacyColor(value));
@@ -155,8 +143,8 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
   await waitForInvoiceAssets(invoiceSheet);
   await nextFrame();
 
-  const rect = invoiceSheet.getBoundingClientRect();
-  const width = Math.max(1, Math.round(rect.width || invoiceSheet.scrollWidth || 794));
+  const sourceRect = invoiceSheet.getBoundingClientRect();
+  const width = Math.max(1, Math.round(sourceRect.width || invoiceSheet.scrollWidth || 794));
   const isolated = buildIsolatedInvoice(invoiceSheet);
   isolated.style.width = `${width}px`;
   isolated.style.minWidth = `${width}px`;
@@ -177,9 +165,7 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
   try {
     const isolatedDocument = iframe.contentDocument;
     const isolatedWindow = iframe.contentWindow;
-    if (!isolatedDocument || !isolatedWindow) {
-      throw new Error('Could not create isolated PDF rendering document.');
-    }
+    if (!isolatedDocument || !isolatedWindow) throw new Error('Could not create isolated PDF rendering document.');
 
     isolatedDocument.open();
     isolatedDocument.write(`<!doctype html><html><head><meta charset="utf-8"><base href="${document.baseURI}"></head><body></body></html>`);
@@ -193,29 +179,14 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
     isolatedDocument.body.style.minWidth = `${width}px`;
     isolatedDocument.body.style.background = '#ffffff';
     isolatedDocument.body.style.overflow = 'visible';
-
     isolatedDocument.body.appendChild(isolated);
 
-    // The iframe has no stylesheet, so wait for local assets only.
     await waitForInvoiceAssets(isolated, isolatedDocument);
     await nextFrame(isolatedWindow);
 
-    const height = Math.max(
-      1,
-      Math.ceil(isolated.scrollHeight),
-      Math.ceil(isolated.getBoundingClientRect().height),
-    );
-
+    const height = Math.max(1, Math.ceil(isolated.scrollHeight), Math.ceil(isolated.getBoundingClientRect().height));
     isolated.style.height = `${height}px`;
     isolated.style.minHeight = `${height}px`;
-
-    // Final defensive sweep for any CSS-bearing attribute that may have survived.
-    isolated.querySelectorAll<HTMLElement>('[style]').forEach((node) => {
-      if (unsupportedColorPattern.test(node.getAttribute('style') || '')) {
-        node.removeAttribute('style');
-      }
-    });
-
     await nextFrame(isolatedWindow);
 
     const canvas = await html2canvas(isolated, {
@@ -237,11 +208,8 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
       foreignObjectRendering: true,
     });
 
-    if (!canvas.width || !canvas.height) {
-      throw new Error('Could not render invoice for PDF export.');
-    }
-
-    return canvas;
+    if (!canvas.width || !canvas.height) throw new Error('Could not render invoice for PDF export.');
+    return { canvas, cssWidth: width, cssHeight: height };
   } finally {
     iframe.remove();
   }
@@ -252,57 +220,56 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   if (!source) throw new Error('Invoice preview element not found.');
 
   const invoiceSheet = source.querySelector<HTMLElement>('.print-container') || source;
-  const canvas = await renderInvoiceToCanvas(invoiceSheet);
+  const { canvas, cssWidth, cssHeight } = await renderInvoiceToCanvas(invoiceSheet);
 
-  const pdf = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4',
-    compress: true,
-  });
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
 
-  const pdfWidth = pdf.internal.pageSize.getWidth();
-  const pdfHeight = pdf.internal.pageSize.getHeight();
-  const imageWidthPx = canvas.width;
-  const imageHeightPx = canvas.height;
-  const imageHeightMm = (imageHeightPx * pdfWidth) / imageWidthPx;
+  // Preserve the browser's 96 CSS-pixel physical scale instead of stretching a
+  // narrow preview to the full A4 width. This keeps font size and spacing close
+  // to the visible invoice. Center the invoice horizontally on the page.
+  const cssPxToMm = 25.4 / 96;
+  const imageWidthMm = cssWidth * cssPxToMm;
+  const imageHeightMm = cssHeight * cssPxToMm;
+  const leftMargin = Math.max(0, (pageWidth - imageWidthMm) / 2);
 
-  if (imageHeightMm <= pdfHeight + 0.01) {
+  if (imageHeightMm <= pageHeight) {
     pdf.addImage(
       canvas.toDataURL('image/jpeg', 0.95),
       'JPEG',
+      leftMargin,
       0,
-      0,
-      pdfWidth,
+      imageWidthMm,
       imageHeightMm,
       undefined,
       'FAST',
     );
   } else {
-    const pageCanvasHeight = Math.max(1, Math.floor((imageWidthPx * pdfHeight) / pdfWidth));
+    const pageCanvasHeight = Math.max(1, Math.floor(pageHeight / cssPxToMm * 2));
     let offsetY = 0;
     let pageIndex = 0;
 
-    while (offsetY < imageHeightPx) {
-      const sliceHeight = Math.min(pageCanvasHeight, imageHeightPx - offsetY);
+    while (offsetY < canvas.height) {
+      const sliceHeight = Math.min(pageCanvasHeight, canvas.height - offsetY);
       const pageCanvas = document.createElement('canvas');
-      pageCanvas.width = imageWidthPx;
+      pageCanvas.width = canvas.width;
       pageCanvas.height = sliceHeight;
       const ctx = pageCanvas.getContext('2d');
       if (!ctx) throw new Error('Could not prepare PDF page.');
 
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-      ctx.drawImage(canvas, 0, offsetY, imageWidthPx, sliceHeight, 0, 0, imageWidthPx, sliceHeight);
+      ctx.drawImage(canvas, 0, offsetY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
 
       if (pageIndex > 0) pdf.addPage();
-      const sliceHeightMm = (sliceHeight * pdfWidth) / imageWidthPx;
+      const sliceHeightMm = sliceHeight / 2 * cssPxToMm;
       pdf.addImage(
         pageCanvas.toDataURL('image/jpeg', 0.95),
         'JPEG',
+        leftMargin,
         0,
-        0,
-        pdfWidth,
+        imageWidthMm,
         sliceHeightMm,
         undefined,
         'FAST',
