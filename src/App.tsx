@@ -6,7 +6,7 @@ import { bookingService } from './services/bookingService';
 import { clientService } from './services/clientService';
 import { vendorService } from './services/vendorService';
 import { invoiceService } from './services/invoiceService';
-import { createInvoiceWithBooking, backfillBookingsFromInvoices, createBookingForInvoice } from './services/invoiceBookingService';
+import { createInvoiceWithBooking, backfillBookingsFromInvoices } from './services/invoiceBookingService';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { DashboardView } from './components/dashboard/DashboardView';
@@ -22,6 +22,32 @@ import { FinanceView } from './components/finance/FinanceView';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 const VENDOR_PAYMENT_KEY = 'together-events-vendor-payments-v1';
+
+function invoiceToBooking(invoice: Invoice, idOverride?: string): Booking {
+  const totalAmount = Number(invoice.totalAmount || 0);
+  const advancePaid = Number(invoice.advancePaid || 0);
+  const bookingStatus: Booking['bookingStatus'] = 'Confirmed';
+  const paymentStatus: Booking['paymentStatus'] = advancePaid >= totalAmount && totalAmount > 0 ? 'Paid' : advancePaid > 0 ? 'Partial' : 'Pending';
+  return {
+    id: idOverride || invoice.bookingId || `invoice-${invoice.id}`,
+    clientId: invoice.clientId,
+    clientName: invoice.clientName,
+    eventType: invoice.eventType,
+    eventDate: invoice.eventDate,
+    eventTime: invoice.eventTime || '',
+    venue: invoice.venue || '',
+    guestCount: Number(invoice.guestCount || 0),
+    package: invoice.items?.[0]?.description?.trim() || 'Custom Package',
+    totalAmount,
+    advancePaid,
+    remainingAmount: Math.max(0, Number(invoice.remainingBalance ?? totalAmount - advancePaid)),
+    bookingStatus,
+    paymentStatus,
+    notes: invoice.notes || '',
+    assignedVendors: [],
+    createdAt: invoice.createdAt,
+  };
+}
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
@@ -93,6 +119,20 @@ export default function App() {
     let freshBookings = b.status === 'fulfilled' && Array.isArray(b.value) ? b.value : [];
     const freshInvoices = i.status === 'fulfilled' && Array.isArray(i.value) ? i.value : [];
     if (freshInvoices.length) freshBookings = await backfillBookingsFromInvoices(freshInvoices, freshBookings);
+
+    // UI fallback: an invoice is itself a confirmed event, so it must remain visible
+    // even when the linked bookings row is unavailable or an older invoice has no bookingId.
+    const existingBookingIds = new Set(freshBookings.map(booking => booking.id));
+    for (const invoice of freshInvoices) {
+      const linkedId = invoice.bookingId;
+      const hasLinkedBooking = linkedId ? existingBookingIds.has(linkedId) : false;
+      if (!hasLinkedBooking && invoice.eventDate && invoice.clientId) {
+        const fallback = invoiceToBooking(invoice, linkedId);
+        freshBookings.push(fallback);
+        existingBookingIds.add(fallback.id);
+      }
+    }
+
     if (freshBookings.length && freshInvoices.length) freshBookings = await syncLegacyVendorPayments(freshBookings, freshInvoices);
     setBookings(freshBookings);
     if (c.status === 'fulfilled') setClients(Array.isArray(c.value) ? c.value : []);
@@ -105,20 +145,10 @@ export default function App() {
   const refreshBookings = async (created?: Booking) => {
     try {
       const fresh = await bookingService.getBookings();
-      setBookings(current => {
-        if (!created) return fresh;
-        const found = fresh.some(b => b.id === created.id);
-        return found ? fresh : [created, ...fresh];
-      });
-      return fresh.length || created ? (fresh.some(b => b.id === created?.id) ? fresh : [created, ...fresh]) : null;
-    } catch (error) {
-      console.error('Error refreshing bookings:', error);
-      if (created) {
-        setBookings(current => current.some(b => b.id === created.id) ? current : [created, ...current]);
-        return [created, ...bookings];
-      }
-      return null;
-    }
+      if (fresh.length > 0) { setBookings(fresh); return fresh; }
+    } catch (error) { console.error('Error refreshing bookings:', error); }
+    if (created) setBookings(current => current.some(b => b.id === created.id) ? current.map(b => b.id === created.id ? created : b) : [created, ...current]);
+    return null;
   };
 
   const handleUpdateBooking = async (id: string, updates: Partial<Booking>) => { const updated = await bookingService.updateBooking(id, updates); await refreshBookings(updated); return updated; };
@@ -135,8 +165,9 @@ export default function App() {
   const handleCreateInvoice = async (invoiceData: Omit<Invoice, 'id' | 'createdAt'>) => {
     try {
       const { invoice: created, booking } = await createInvoiceWithBooking(invoiceData);
-      await refreshBookings(booking || undefined);
-      setInvoices(current => { const exists = current.some(inv => inv.id === created.id); return exists ? current.map(inv => inv.id === created.id ? created : inv) : [created, ...current]; });
+      if (booking) await refreshBookings(booking);
+      else setBookings(current => [invoiceToBooking(created), ...current.filter(b => b.id !== `invoice-${created.id}` && b.id !== created.bookingId)]);
+      setInvoices(await invoiceService.getInvoices());
       return created;
     } catch (error) {
       console.error('Invoice save failed:', error);
@@ -147,26 +178,27 @@ export default function App() {
   const handleUpdateInvoice = async (id: string, updates: Partial<Invoice>) => {
     const current = invoices.find(inv => inv.id === id) || await invoiceService.getInvoiceById(id);
     const updated = await invoiceService.updateInvoice(id, updates);
-    let linkedBooking: Booking | null = null;
     if (current?.bookingId) {
       const bookingUpdates: Partial<Booking> = {};
       if (updates.clientId !== undefined) bookingUpdates.clientId = updates.clientId;
       if (updates.clientName !== undefined) bookingUpdates.clientName = updates.clientName;
-      if (updates.eventType !== undefined) bookingUpdates.eventType = updated.eventType;
-      if (updates.eventDate !== undefined) bookingUpdates.eventDate = updated.eventDate;
+      if (updates.eventType !== undefined) bookingUpdates.eventType = updates.eventType;
+      if (updates.eventDate !== undefined) bookingUpdates.eventDate = updates.eventDate;
       if (updates.eventTime !== undefined) bookingUpdates.eventTime = updates.eventTime || '';
       if (updates.venue !== undefined) bookingUpdates.venue = updates.venue || '';
-      if (updates.totalAmount !== undefined) bookingUpdates.totalAmount = Number(updated.totalAmount || 0);
-      if (updates.advancePaid !== undefined) bookingUpdates.advancePaid = Number(updated.advancePaid || 0);
+      if (updates.totalAmount !== undefined) bookingUpdates.totalAmount = Number(updates.totalAmount || 0);
+      if (updates.advancePaid !== undefined) bookingUpdates.advancePaid = Number(updates.advancePaid || 0);
       if (updates.notes !== undefined) bookingUpdates.notes = updates.notes || '';
-      if (Object.keys(bookingUpdates).length) linkedBooking = await handleUpdateBooking(current.bookingId, bookingUpdates);
-      else linkedBooking = await bookingService.getBookingById(current.bookingId);
+      if (Object.keys(bookingUpdates).length) await handleUpdateBooking(current.bookingId, bookingUpdates);
     } else {
-      linkedBooking = await createBookingForInvoice(updated);
+      setBookings(currentBookings => {
+        const replacement = invoiceToBooking(updated);
+        const existing = currentBookings.findIndex(b => b.id === replacement.id);
+        if (existing >= 0) return currentBookings.map((b, index) => index === existing ? replacement : b);
+        return [replacement, ...currentBookings];
+      });
     }
-    if (linkedBooking) await refreshBookings(linkedBooking);
-    else await refreshBookings();
-    setInvoices(inv => inv.some(item => item.id === updated.id) ? inv.map(item => item.id === updated.id ? updated : item) : [updated, ...inv]);
+    setInvoices(await invoiceService.getInvoices());
     return updated;
   };
 
@@ -176,6 +208,8 @@ export default function App() {
     if (current?.bookingId) {
       try { await bookingService.deleteBooking(current.bookingId); } catch (error) { console.error('Failed to delete linked booking:', error); }
       setBookings(currentBookings => currentBookings.filter(b => b.id !== current.bookingId));
+    } else {
+      setBookings(currentBookings => currentBookings.filter(b => b.id !== `invoice-${id}`));
     }
     setInvoices(await invoiceService.getInvoices());
     if (previewInvoice?.id === id) setPreviewInvoice(null);
