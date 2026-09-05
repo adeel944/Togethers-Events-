@@ -2,6 +2,31 @@ import { BusinessProfile, InvoiceSettings } from '../types';
 import { initialBusinessProfile, initialInvoiceSettings } from './mockData';
 import { supabase } from '../lib/supabase';
 
+const PROFILE_ASSET_STORAGE_KEY = 'together-events-business-assets-v1';
+
+function getLocalAssets(): { logoUrl?: string; signatureUrl?: string } {
+  try {
+    const raw = localStorage.getItem(PROFILE_ASSET_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return {
+      logoUrl: typeof parsed?.logoUrl === 'string' ? parsed.logoUrl : undefined,
+      signatureUrl: typeof parsed?.signatureUrl === 'string' ? parsed.signatureUrl : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalAssets(assets: { logoUrl?: string; signatureUrl?: string }) {
+  try {
+    const current = getLocalAssets();
+    localStorage.setItem(PROFILE_ASSET_STORAGE_KEY, JSON.stringify({ ...current, ...assets }));
+  } catch {
+    // Database persistence remains the primary source; local fallback is best-effort.
+  }
+}
+
 async function getBusinessId(): Promise<string> {
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError || !userData.user) throw new Error('Not authenticated. Please sign in again.');
@@ -12,12 +37,14 @@ async function getBusinessId(): Promise<string> {
 }
 
 function mapProfile(row: any): BusinessProfile {
+  const localAssets = getLocalAssets();
   return {
     businessName: row.business_name || '', tagline: row.tagline || '', ownerName: row.owner_name || '',
     phone: row.phone || '', whatsApp: row.whatsapp || '', email: row.email || '', website: row.website || '',
     address: row.address || '', city: row.city || '', country: row.country || '',
     taxNumber: row.tax_number || undefined, registrationNumber: row.registration_number || undefined,
-    logoUrl: row.logo_url || undefined, signatureUrl: row.signature_url || undefined,
+    logoUrl: row.logo_url || localAssets.logoUrl || undefined,
+    signatureUrl: row.signature_url || localAssets.signatureUrl || undefined,
     invoiceFooterText: row.invoice_footer_text || '', defaultTerms: row.default_terms || '',
     defaultCurrency: 'PKR', currency: 'PKR', currencySymbol: 'Rs. ',
     invoicePrefix: row.invoice_prefix || 'TE-', invoiceStartingNumber: Number(row.invoice_starting_number || 1001),
@@ -54,10 +81,15 @@ export const businessService = {
       defaultTerms: 'default_terms', invoicePrefix: 'invoice_prefix', invoiceStartingNumber: 'invoice_starting_number', bankDetails: 'bank_details',
     };
     for (const [key, column] of Object.entries(fields)) if ((updates as any)[key] !== undefined) dbUpdates[column] = (updates as any)[key];
-    // This application is PKR-only. Never persist an old AED/USD/etc. setting.
     dbUpdates.default_currency = 'PKR';
     dbUpdates.currency = 'PKR';
     dbUpdates.currency_symbol = 'Rs. ';
+
+    // Keep logo/signature available immediately even if an older database row cannot store the image payload.
+    if ((updates as any).logoUrl !== undefined || (updates as any).signatureUrl !== undefined) {
+      saveLocalAssets({ logoUrl: (updates as any).logoUrl, signatureUrl: (updates as any).signatureUrl });
+    }
+
     const { data, error } = await supabase.from('businesses').update(dbUpdates).eq('id', businessId).select('*').single();
     if (error) throw new Error(error.message);
     const updated = mapProfile(data);
