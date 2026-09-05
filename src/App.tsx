@@ -22,6 +22,7 @@ import { FinanceView } from './components/finance/FinanceView';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 const VENDOR_PAYMENT_KEY = 'together-events-vendor-payments-v1';
+const TAB_KEY = 'together-events-current-tab';
 
 function invoiceToBooking(invoice: Invoice, idOverride?: string): Booking {
   const totalAmount = Number(invoice.totalAmount || 0);
@@ -50,7 +51,10 @@ function invoiceToBooking(invoice: Invoice, idOverride?: string): Booking {
 }
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
+  const [currentTab, setCurrentTab] = useState<NavTab>(() => {
+    const saved = sessionStorage.getItem(TAB_KEY) as NavTab | null;
+    return saved || 'dashboard';
+  });
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [profile, setProfile] = useState<BusinessProfile>(initialBusinessProfile);
   const [settings, setSettings] = useState<InvoiceSettings>(initialInvoiceSettings);
@@ -119,9 +123,6 @@ export default function App() {
     let freshBookings = b.status === 'fulfilled' && Array.isArray(b.value) ? b.value : [];
     const freshInvoices = i.status === 'fulfilled' && Array.isArray(i.value) ? i.value : [];
     if (freshInvoices.length) freshBookings = await backfillBookingsFromInvoices(freshInvoices, freshBookings);
-
-    // UI fallback: an invoice is itself a confirmed event, so it must remain visible
-    // even when the linked bookings row is unavailable or an older invoice has no bookingId.
     const existingBookingIds = new Set(freshBookings.map(booking => booking.id));
     for (const invoice of freshInvoices) {
       const linkedId = invoice.bookingId;
@@ -132,7 +133,6 @@ export default function App() {
         existingBookingIds.add(fallback.id);
       }
     }
-
     if (freshBookings.length && freshInvoices.length) freshBookings = await syncLegacyVendorPayments(freshBookings, freshInvoices);
     setBookings(freshBookings);
     if (c.status === 'fulfilled') setClients(Array.isArray(c.value) ? c.value : []);
@@ -150,7 +150,6 @@ export default function App() {
     if (created) setBookings(current => current.some(b => b.id === created.id) ? current.map(b => b.id === created.id ? created : b) : [created, ...current]);
     return null;
   };
-
   const handleUpdateBooking = async (id: string, updates: Partial<Booking>) => { const updated = await bookingService.updateBooking(id, updates); await refreshBookings(updated); return updated; };
   const handleDeleteBooking = async (id: string) => { const result = await bookingService.deleteBooking(id); setBookings(current => current.filter(b => b.id !== id)); return result; };
   const handleAssignVendor = async (bookingId: string, vendorData: any) => { const updated = await bookingService.assignVendor(bookingId, vendorData); await refreshBookings(updated); return updated; };
@@ -174,7 +173,6 @@ export default function App() {
       throw new Error(error instanceof Error ? error.message : 'Invoice could not be saved. Please try again.');
     }
   };
-
   const handleUpdateInvoice = async (id: string, updates: Partial<Invoice>) => {
     const current = invoices.find(inv => inv.id === id) || await invoiceService.getInvoiceById(id);
     const updated = await invoiceService.updateInvoice(id, updates);
@@ -201,7 +199,6 @@ export default function App() {
     setInvoices(await invoiceService.getInvoices());
     return updated;
   };
-
   const handleDeleteInvoice = async (id: string) => {
     const current = invoices.find(inv => inv.id === id) || await invoiceService.getInvoiceById(id);
     const result = await invoiceService.deleteInvoice(id);
@@ -215,13 +212,12 @@ export default function App() {
     if (previewInvoice?.id === id) setPreviewInvoice(null);
     return result;
   };
-
   const handleDuplicateInvoice = async (id: string) => { const duplicate = await invoiceService.duplicateInvoice(id); setInvoices(await invoiceService.getInvoices()); return duplicate; };
   const handleSaveProfile = async (data: BusinessProfile) => { const saved = await businessService.saveProfile({ ...data, defaultCurrency: 'PKR', currency: 'PKR', currencySymbol: 'Rs. ' }); setProfile(saved); return saved; };
   const handleSaveSettings = async (data: InvoiceSettings) => { const saved = await businessService.saveInvoiceSettings(data); setSettings(saved); return saved; };
   const handleSaveLogo = async (logoUrl: string) => { await handleSaveProfile({ ...profile, logoUrl }); };
-  const handleTabChange = (tab: NavTab) => { setCurrentTab(tab); setPreviewInvoice(null); };
-  const handleSelectBooking = (booking: Booking) => { setSelectedBookingForDetail(booking); setCurrentTab('bookings'); setPreviewInvoice(null); };
+  const handleTabChange = (tab: NavTab) => { sessionStorage.setItem(TAB_KEY, tab); setCurrentTab(tab); setPreviewInvoice(null); };
+  const handleSelectBooking = (booking: Booking) => { setSelectedBookingForDetail(booking); setCurrentTab('bookings'); sessionStorage.setItem(TAB_KEY, 'bookings'); setPreviewInvoice(null); };
 
   return <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-[#d4e1ec] via-[#e3ecf3] to-[#c8d8e5] flex text-slate-800 antialiased font-sans">
     <Sidebar currentTab={currentTab} onTabChange={handleTabChange} onSelectTab={handleTabChange} profile={profile} isMobileOpen={isMobileSidebarOpen} isOpenMobile={isMobileSidebarOpen} onCloseMobile={() => setIsMobileSidebarOpen(false)} />
