@@ -48,18 +48,45 @@ const sanitizeComputedValue = (property: string, value: string, computed: CSSSty
   return null;
 };
 
-const buildIsolatedInvoice = (source: HTMLElement) => {
-  const sourceNodes = [source, ...Array.from(source.querySelectorAll<HTMLElement>('*'))];
+/**
+ * Copies the application's stylesheets into an A4-sized iframe first, then
+ * computes styles INSIDE that iframe. This is important on mobile: computing
+ * styles in the mobile parent captures responsive/mobile font sizes and flex
+ * rules, which can make the exported PDF crop or scale incorrectly.
+ */
+const buildA4IsolatedInvoice = async (source: HTMLElement, doc: Document, win: Window, width: number) => {
   const clone = source.cloneNode(true) as HTMLElement;
-  const cloneNodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
-  const count = Math.min(sourceNodes.length, cloneNodes.length);
+  clone.removeAttribute('id');
+  clone.style.position = 'static';
+  clone.style.left = 'auto';
+  clone.style.top = 'auto';
+  clone.style.transform = 'none';
+  clone.style.margin = '0';
+  clone.style.width = `${width}px`;
+  clone.style.minWidth = `${width}px`;
+  clone.style.maxWidth = `${width}px`;
+  clone.style.overflow = 'visible';
+  clone.style.backgroundColor = '#ffffff';
+  clone.style.boxSizing = 'border-box';
 
-  for (let i = 0; i < count; i += 1) {
-    const sourceNode = sourceNodes[i];
-    const cloneNode = cloneNodes[i];
-    const computed = window.getComputedStyle(sourceNode);
-    cloneNode.removeAttribute('class');
-    cloneNode.removeAttribute('style');
+  // Re-use the same app stylesheets, but do NOT copy the live responsive
+  // computed styles. The iframe itself is the desktop/A4 rendering viewport.
+  const head = doc.head;
+  const styleSheets = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'));
+  for (const node of styleSheets) {
+    head.appendChild(node.cloneNode(true));
+  }
+
+  doc.body.appendChild(clone);
+  await waitForInvoiceAssets(clone, doc);
+  await nextFrame(win);
+
+  const sourceNodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
+  for (const node of sourceNodes) {
+    const computed = win.getComputedStyle(node);
+    // Remove classes so html2canvas sees the exact frozen A4 styles below.
+    node.removeAttribute('class');
+    node.removeAttribute('style');
 
     for (let p = 0; p < computed.length; p += 1) {
       const property = computed.item(p);
@@ -68,30 +95,37 @@ const buildIsolatedInvoice = (source: HTMLElement) => {
       if (!rawValue) continue;
       const safeValue = sanitizeComputedValue(property, rawValue, computed);
       if (safeValue === null) continue;
-      try { cloneNode.style.setProperty(property, safeValue, computed.getPropertyPriority(property)); } catch { /* ignore unsupported browser declarations */ }
+      try { node.style.setProperty(property, safeValue, computed.getPropertyPriority(property)); } catch { /* ignore */ }
     }
 
     const colorPairs: Array<[string, string]> = [
-      ['color', computed.color], ['background-color', computed.backgroundColor], ['border-top-color', computed.borderTopColor],
-      ['border-right-color', computed.borderRightColor], ['border-bottom-color', computed.borderBottomColor], ['border-left-color', computed.borderLeftColor],
-      ['outline-color', computed.outlineColor], ['text-decoration-color', computed.textDecorationColor],
+      ['color', computed.color],
+      ['background-color', computed.backgroundColor],
+      ['border-top-color', computed.borderTopColor],
+      ['border-right-color', computed.borderRightColor],
+      ['border-bottom-color', computed.borderBottomColor],
+      ['border-left-color', computed.borderLeftColor],
+      ['outline-color', computed.outlineColor],
+      ['text-decoration-color', computed.textDecorationColor],
     ];
     for (const [property, value] of colorPairs) {
       if (!value || value === 'transparent') continue;
-      try { cloneNode.style.setProperty(property, toLegacyColor(value)); } catch { /* ignore */ }
+      try { node.style.setProperty(property, toLegacyColor(value)); } catch { /* ignore */ }
     }
 
     for (const attribute of ['fill', 'stroke', 'stop-color', 'flood-color', 'lighting-color', 'color']) {
-      const value = cloneNode.getAttribute(attribute);
-      if (value && unsupportedColorPattern.test(value)) cloneNode.setAttribute(attribute, toLegacyColor(value));
+      const value = node.getAttribute(attribute);
+      if (value && unsupportedColorPattern.test(value)) node.setAttribute(attribute, toLegacyColor(value));
     }
   }
 
   clone.style.position = 'static';
-  clone.style.left = 'auto';
-  clone.style.top = 'auto';
-  clone.style.transform = 'none';
   clone.style.margin = '0';
+  clone.style.width = `${width}px`;
+  clone.style.minWidth = `${width}px`;
+  clone.style.maxWidth = `${width}px`;
+  clone.style.height = 'auto';
+  clone.style.minHeight = '0';
   clone.style.overflow = 'visible';
   clone.style.backgroundColor = '#ffffff';
   clone.style.boxSizing = 'border-box';
@@ -102,15 +136,9 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
   await waitForInvoiceAssets(invoiceSheet);
   await nextFrame();
 
-  // Always render the invoice at the same fixed CSS width used by an A4 sheet.
-  // This prevents mobile's narrow viewport from changing the PDF's typography/layout.
+  // A4 at 96 CSS DPI. The invoice itself is rendered at this width rather
+  // than using the mobile preview width, so desktop and mobile export identically.
   const A4_CSS_WIDTH = 794;
-  const isolated = buildIsolatedInvoice(invoiceSheet);
-  isolated.style.width = `${A4_CSS_WIDTH}px`;
-  isolated.style.minWidth = `${A4_CSS_WIDTH}px`;
-  isolated.style.maxWidth = `${A4_CSS_WIDTH}px`;
-  isolated.style.flex = 'none';
-
   const iframe = document.createElement('iframe');
   iframe.setAttribute('aria-hidden', 'true');
   iframe.style.position = 'fixed';
@@ -127,6 +155,7 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
     const isolatedDocument = iframe.contentDocument;
     const isolatedWindow = iframe.contentWindow;
     if (!isolatedDocument || !isolatedWindow) throw new Error('Could not create isolated PDF rendering document.');
+
     isolatedDocument.open();
     isolatedDocument.write(`<!doctype html><html><head><meta charset="utf-8"><base href="${document.baseURI}"></head><body></body></html>`);
     isolatedDocument.close();
@@ -138,10 +167,10 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
     isolatedDocument.body.style.minWidth = `${A4_CSS_WIDTH}px`;
     isolatedDocument.body.style.background = '#ffffff';
     isolatedDocument.body.style.overflow = 'visible';
-    isolatedDocument.body.appendChild(isolated);
 
-    await waitForInvoiceAssets(isolated, isolatedDocument);
+    const isolated = await buildA4IsolatedInvoice(invoiceSheet, isolatedDocument, isolatedWindow, A4_CSS_WIDTH);
     await nextFrame(isolatedWindow);
+
     const height = Math.max(1, Math.ceil(isolated.scrollHeight), Math.ceil(isolated.getBoundingClientRect().height));
     isolated.style.height = `${height}px`;
     isolated.style.minHeight = `${height}px`;
@@ -153,10 +182,17 @@ const renderInvoiceToCanvas = async (invoiceSheet: HTMLElement) => {
       height,
       windowWidth: A4_CSS_WIDTH,
       windowHeight: Math.max(height, 1000),
-      x: 0, y: 0, scrollX: 0, scrollY: 0,
+      x: 0,
+      y: 0,
+      scrollX: 0,
+      scrollY: 0,
       backgroundColor: '#ffffff',
-      useCORS: true, allowTaint: false, imageTimeout: 15000, logging: false,
-      removeContainer: true, foreignObjectRendering: true,
+      useCORS: true,
+      allowTaint: false,
+      imageTimeout: 15000,
+      logging: false,
+      removeContainer: true,
+      foreignObjectRendering: true,
     });
     if (!canvas.width || !canvas.height) throw new Error('Could not render invoice for PDF export.');
     return { canvas, cssWidth: A4_CSS_WIDTH, cssHeight: height };
@@ -182,7 +218,8 @@ export const downloadInvoicePdf = async (elementId: string, invoiceNumber: strin
   if (imageHeightMm <= pageHeight) {
     pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', leftMargin, 0, imageWidthMm, imageHeightMm, undefined, 'FAST');
   } else {
-    const pageCanvasHeight = Math.max(1, Math.floor(pageHeight / cssPxToMm * 2));
+    // Canvas is rendered at scale 2, so each CSS pixel occupies 2 canvas pixels.
+    const pageCanvasHeight = Math.max(1, Math.floor((pageHeight / cssPxToMm) * 2));
     let offsetY = 0;
     let pageIndex = 0;
     while (offsetY < canvas.height) {
@@ -225,7 +262,7 @@ const buildInvoiceDetails = (invoice: Invoice, profile: BusinessProfile, email =
   const formattedTotal = `${profile.currencySymbol}${Number(invoice.totalAmount || 0).toLocaleString()}`;
   const formattedRemaining = `${profile.currencySymbol}${Number(invoice.remainingBalance || 0).toLocaleString()}`;
   const lines = [
-    email ? 'Invoice Details' : `*Invoice Details*`,
+    email ? 'Invoice Details' : '*Invoice Details*',
     `Invoice No: #${invoice.invoiceNumber}`,
     `Event: ${invoice.eventType}`,
     `Event Date: ${invoice.eventDate}${invoice.eventTime ? ` (${invoice.eventTime})` : ''}`,
